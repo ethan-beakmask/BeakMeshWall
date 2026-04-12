@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Go
+agent/beakguard-agent
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment & secrets
+.env
+*.pem
+*.key
+*.crt
+!deploy/**/*.example
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# Config (local overrides)
+config.local.ini
