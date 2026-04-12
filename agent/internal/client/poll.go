@@ -7,14 +7,15 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anthropics/BeakMeshWall/agent/internal/driver"
+	"github.com/anthropics/BeakMeshWall/agent/internal/module"
 )
 
 // Task represents a single task received from the Central Server.
 type Task struct {
-	ID     string          `json:"id"`
-	Action string          `json:"action"`
-	Params json.RawMessage `json:"params"`
+	ID     string                 `json:"id"`
+	Module string                 `json:"module"`
+	Action string                 `json:"action"`
+	Params map[string]interface{} `json:"params"`
 }
 
 // PollResponse is the response from GET /api/v1/agent/poll.
@@ -30,9 +31,10 @@ type PollConfig struct {
 
 // TaskResult represents the result of a processed task, sent back via report.
 type TaskResult struct {
-	TaskID  string `json:"task_id"`
-	Status  string `json:"status"` // "success", "error", "skipped"
-	Message string `json:"message,omitempty"`
+	TaskID  string      `json:"task_id"`
+	Status  string      `json:"status"` // "success", "error"
+	Message string      `json:"message,omitempty"`
+	Data    interface{} `json:"data,omitempty"`
 }
 
 // ReportRequest is the payload sent to POST /api/v1/agent/report.
@@ -54,16 +56,15 @@ const (
 )
 
 // StartPollLoop begins the poll loop that periodically contacts the Central Server
-// for tasks. It respects context cancellation for graceful shutdown.
-// The driver parameter is reserved for future task execution (P2+).
-func StartPollLoop(ctx context.Context, client *Client, drv driver.Driver, logger *slog.Logger) error {
+// for tasks. It dispatches tasks through the module.Registry and reports results.
+// It respects context cancellation for graceful shutdown.
+func StartPollLoop(ctx context.Context, client *Client, registry *module.Registry, logger *slog.Logger) error {
 	pollInterval := 30 * time.Second
 	backoff := initialBackoff
 	consecutiveErrors := 0
 
 	logger.Info("starting poll loop",
 		"poll_interval", pollInterval,
-		"driver", drv.Name(),
 	)
 
 	// Perform initial poll immediately, then loop on timer
@@ -85,7 +86,7 @@ func StartPollLoop(ctx context.Context, client *Client, drv driver.Driver, logge
 				firstPoll = false
 			}
 
-			err := poll(ctx, client, drv, logger)
+			err := poll(ctx, client, registry, logger)
 			if err != nil {
 				consecutiveErrors++
 
@@ -136,8 +137,8 @@ func StartPollLoop(ctx context.Context, client *Client, drv driver.Driver, logge
 	}
 }
 
-// poll performs a single poll cycle: fetch tasks, log them, and report results.
-func poll(ctx context.Context, client *Client, drv driver.Driver, logger *slog.Logger) error {
+// poll performs a single poll cycle: fetch tasks, dispatch via registry, report results.
+func poll(ctx context.Context, client *Client, registry *module.Registry, logger *slog.Logger) error {
 	// Check context before making the request
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -164,7 +165,7 @@ func poll(ctx context.Context, client *Client, drv driver.Driver, logger *slog.L
 		logger.Debug("poll interval from server", "interval", pollResp.Config.PollInterval)
 	}
 
-	// Process tasks (P1: log only, no actual execution)
+	// Process tasks
 	if len(pollResp.Tasks) == 0 {
 		logger.Debug("no pending tasks")
 		return nil
@@ -174,16 +175,27 @@ func poll(ctx context.Context, client *Client, drv driver.Driver, logger *slog.L
 
 	var results []TaskResult
 	for _, task := range pollResp.Tasks {
-		logger.Info("task received (P1: log only, not executing)",
+		logger.Info("dispatching task",
 			"task_id", task.ID,
+			"module", task.Module,
 			"action", task.Action,
-			"params", string(task.Params),
 		)
 
+		// Convert client.Task to module.Task for dispatch
+		modTask := module.Task{
+			ID:     task.ID,
+			Module: task.Module,
+			Action: task.Action,
+			Params: task.Params,
+		}
+
+		modResult := registry.Dispatch(modTask)
+
 		results = append(results, TaskResult{
-			TaskID:  task.ID,
-			Status:  "skipped",
-			Message: "P1: task logging only, execution not implemented",
+			TaskID:  modResult.TaskID,
+			Status:  modResult.Status,
+			Message: modResult.Message,
+			Data:    modResult.Data,
 		})
 	}
 
@@ -191,7 +203,7 @@ func poll(ctx context.Context, client *Client, drv driver.Driver, logger *slog.L
 	if len(results) > 0 {
 		if err := report(client, results, logger); err != nil {
 			logger.Warn("failed to report task results", "error", err)
-			// Non-fatal: tasks were logged, report failure should not stop polling
+			// Non-fatal: tasks were executed, report failure should not stop polling
 		}
 	}
 
@@ -231,4 +243,14 @@ func (e *authError) Error() string {
 func isAuthError(err error) bool {
 	_, ok := err.(*authError)
 	return ok
+}
+
+// marshalParams converts map[string]interface{} to json.RawMessage for logging.
+// This is kept for potential future use in debug logging.
+func marshalParams(params map[string]interface{}) json.RawMessage {
+	data, err := json.Marshal(params)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return data
 }

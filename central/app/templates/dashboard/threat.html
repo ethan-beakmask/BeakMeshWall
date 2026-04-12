@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Threat Feed - BeakMeshWall{% endblock %}
+
+{% block content %}
+<div x-data="threatPage()" x-init="fetchBlocks(); startAutoRefresh()">
+
+    <h4 class="mb-4">Threat Feed Block List</h4>
+
+    <!-- Info Banner -->
+    <div class="alert alert-secondary py-2 px-3" style="font-size: 0.85rem;">
+        This list is populated via the Threat Feed API (POST /api/v1/threat/block).
+        Manual additions from the web UI are not supported.
+        Use the <a href="/dashboard/rules" class="alert-link">Rules</a> page to add manual block rules.
+    </div>
+
+    <!-- Threat Blocks Table -->
+    <div class="table-responsive">
+        <table class="table table-dark table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th role="button" @click="sortBy('ip_address')" style="cursor: pointer;">
+                        IP
+                        <span x-show="sortKey === 'ip_address' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'ip_address' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'ip_address'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('source')" style="cursor: pointer;">
+                        Source
+                        <span x-show="sortKey === 'source' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'source' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'source'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('reason')" style="cursor: pointer;">
+                        Reason
+                        <span x-show="sortKey === 'reason' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'reason' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'reason'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th>Detail</th>
+                    <th role="button" @click="sortBy('duration')" style="cursor: pointer;">
+                        Duration
+                        <span x-show="sortKey === 'duration' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'duration' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'duration'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('expires_at')" style="cursor: pointer;">
+                        Expires At
+                        <span x-show="sortKey === 'expires_at' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'expires_at' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'expires_at'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('created_at')" style="cursor: pointer;">
+                        Created At
+                        <span x-show="sortKey === 'created_at' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'created_at' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'created_at'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="block in sortedBlocks" :key="block.id">
+                    <tr>
+                        <td x-text="block.ip_address"></td>
+                        <td x-text="block.source || '--'"></td>
+                        <td x-text="block.reason || '--'"></td>
+                        <td>
+                            <span class="small" x-text="block.detail || '--'"></span>
+                        </td>
+                        <td x-text="formatDuration(block.duration)"></td>
+                        <td x-text="formatTime(block.expires_at) || 'Permanent'"></td>
+                        <td x-text="formatTime(block.created_at)"></td>
+                    </tr>
+                </template>
+                <template x-if="blocks.length === 0">
+                    <tr>
+                        <td colspan="7" class="text-center text-secondary py-4">
+                            No threat feed blocks active.
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="text-secondary" style="font-size: 0.85rem;">
+        <span x-text="blocks.length"></span> active block(s).
+        Auto-refresh every 30s. Last updated: <span x-text="lastUpdated">--</span>
+    </p>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function threatPage() {
+    return {
+        blocks: [],
+        sortKey: 'created_at',
+        sortAsc: false,
+        lastUpdated: '--',
+        intervalId: null,
+
+        get sortedBlocks() {
+            let key = this.sortKey;
+            let asc = this.sortAsc;
+            return [...this.blocks].sort((a, b) => {
+                let va = a[key] ?? '';
+                let vb = b[key] ?? '';
+                if (typeof va === 'string') {
+                    va = va.toLowerCase();
+                    vb = vb.toLowerCase();
+                }
+                if (va < vb) return asc ? -1 : 1;
+                if (va > vb) return asc ? 1 : -1;
+                return 0;
+            });
+        },
+
+        sortBy(key) {
+            if (this.sortKey === key) {
+                this.sortAsc = !this.sortAsc;
+            } else {
+                this.sortKey = key;
+                this.sortAsc = true;
+            }
+        },
+
+        formatTime(isoStr) {
+            if (!isoStr) return '';
+            let d = new Date(isoStr);
+            return d.toLocaleString();
+        },
+
+        formatDuration(seconds) {
+            if (!seconds) return 'Permanent';
+            if (seconds >= 86400) return Math.floor(seconds / 86400) + 'd';
+            if (seconds >= 3600) return Math.floor(seconds / 3600) + 'h';
+            if (seconds >= 60) return Math.floor(seconds / 60) + 'm';
+            return seconds + 's';
+        },
+
+        fetchBlocks() {
+            fetch('/api/v1/threat/block', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                this.blocks = data.blocks || [];
+                this.lastUpdated = new Date().toLocaleTimeString();
+            })
+            .catch(() => {});
+        },
+
+        startAutoRefresh() {
+            this.intervalId = setInterval(() => this.fetchBlocks(), 30000);
+        }
+    };
+}
+</script>
+{% endblock %}

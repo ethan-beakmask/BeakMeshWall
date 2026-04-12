@@ -16,6 +16,7 @@ import (
 	"github.com/anthropics/BeakMeshWall/agent/internal/client"
 	"github.com/anthropics/BeakMeshWall/agent/internal/config"
 	"github.com/anthropics/BeakMeshWall/agent/internal/driver/nftables"
+	"github.com/anthropics/BeakMeshWall/agent/internal/module"
 )
 
 // version is set at build time via -ldflags "-X main.version=..."
@@ -157,6 +158,10 @@ func cmdRun(args []string) error {
 	}
 	defer drv.Close()
 
+	// Build the module registry and register the firewall module
+	registry := module.NewRegistry()
+	registry.Register(module.NewFirewallModule(drv, logger))
+
 	// Create HTTP client
 	httpClient, err := client.NewClient(cfg, logger)
 	if err != nil {
@@ -185,7 +190,7 @@ func cmdRun(args []string) error {
 	)
 
 	// Start the poll loop (blocks until context is cancelled)
-	return client.StartPollLoop(ctx, httpClient, drv, logger)
+	return client.StartPollLoop(ctx, httpClient, registry, logger)
 }
 
 // setupLogger creates an slog.Logger based on the config.

@@ -6,6 +6,7 @@ from functools import wraps
 from datetime import datetime, timezone
 
 from flask import request, jsonify, g
+from flask_login import current_user
 from werkzeug.security import check_password_hash
 
 from ..extensions import db
@@ -79,6 +80,53 @@ def require_api_key(f):
         db.session.commit()
 
         g.current_api_key = matched_key
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def require_auth(f):
+    """Accept either Flask-Login session auth or X-API-Key header auth.
+
+    On success:
+        - g.auth_type is set to 'session' or 'api_key'
+        - g.auth_identity is a string like 'admin' or 'api:my_key_name'
+        - For API key auth, g.current_api_key is also set
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Check Flask-Login session first
+        if current_user.is_authenticated:
+            g.auth_type = 'session'
+            g.auth_identity = current_user.username
+            return f(*args, **kwargs)
+
+        # Fall back to API key
+        api_key_value = request.headers.get('X-API-Key', '')
+        if not api_key_value:
+            return jsonify({'error': 'Authentication required.'}), 401
+
+        prefix = api_key_value[:8]
+        candidates = APIKey.query.filter_by(prefix=prefix, is_active=True).all()
+
+        matched_key = None
+        for candidate in candidates:
+            if check_password_hash(candidate.key_hash, api_key_value):
+                matched_key = candidate
+                break
+
+        if matched_key is None:
+            return jsonify({'error': 'Invalid API key.'}), 401
+
+        if matched_key.is_expired:
+            return jsonify({'error': 'API key has expired.'}), 401
+
+        matched_key.last_used_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        g.current_api_key = matched_key
+        g.auth_type = 'api_key'
+        g.auth_identity = f'api:{matched_key.name}'
         return f(*args, **kwargs)
 
     return decorated

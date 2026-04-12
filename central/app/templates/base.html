@@ -74,6 +74,18 @@
                     <a class="nav-link {% if request.endpoint == 'dashboard.nodes' %}active{% endif %}"
                        href="{{ url_for('dashboard.nodes') }}">Nodes</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.rules' %}active{% endif %}"
+                       href="{{ url_for('dashboard.rules') }}">Rules</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.threat' %}active{% endif %}"
+                       href="{{ url_for('dashboard.threat') }}">Threat Feed</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.tasks' %}active{% endif %}"
+                       href="{{ url_for('dashboard.tasks') }}">Tasks</a>
+                </li>
             </ul>
         </div>
 

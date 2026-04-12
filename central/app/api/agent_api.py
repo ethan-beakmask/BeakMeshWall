@@ -5,7 +5,7 @@ Agent-facing API endpoints: registration, polling, reporting.
 import secrets
 from datetime import datetime, timezone
 
-from flask import request, jsonify, current_app
+from flask import request, jsonify, current_app, g
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from . import api_bp
@@ -13,6 +13,7 @@ from .decorators import require_agent_auth
 from ..extensions import db
 from ..models.node import Node
 from ..models.api_key import RegistrationToken
+from ..services.task_service import TaskService
 
 
 @api_bp.route('/agent/register', methods=['POST'])
@@ -97,20 +98,23 @@ def agent_poll():
 
     Returns JSON:
         {
-            "tasks": [],
+            "tasks": [
+                {"id": "uuid", "module": "firewall", "action": "block_ip", "params": {...}}
+            ],
             "config": {"poll_interval": 30}
         }
     """
-    from flask import g
-
     node = g.current_node
     node.last_heartbeat_at = datetime.now(timezone.utc)
     db.session.commit()
 
+    # Fetch pending tasks and atomically mark them dispatched
+    pending_tasks = TaskService.get_pending_tasks_for_node(node.id)
+
     poll_interval = current_app.config.get('AGENT_POLL_INTERVAL', 30)
 
     return jsonify({
-        'tasks': [],
+        'tasks': [t.to_dispatch_dict() for t in pending_tasks],
         'config': {
             'poll_interval': poll_interval,
         },
@@ -122,12 +126,56 @@ def agent_poll():
 def agent_report():
     """Agent reports task execution results.
 
-    For P1 this endpoint simply acknowledges the report.
-    Future phases will process and store task results.
+    Expects JSON body:
+        {
+            "results": [
+                {
+                    "task_id": "uuid",
+                    "status": "completed" or "failed",
+                    "message": "optional description",
+                    "data": { ... optional result data ... }
+                }
+            ]
+        }
+
+    Returns JSON:
+        {"status": "processed", "processed": <count>}
     """
     data = request.get_json(silent=True)
     if not data:
         return jsonify({'error': 'Request body must be valid JSON.'}), 400
 
-    # P1: acknowledge receipt -- task processing comes in P2+
-    return jsonify({'status': 'received'})
+    results = data.get('results', [])
+    if not isinstance(results, list):
+        return jsonify({'error': '"results" must be an array.'}), 400
+
+    # Map agent status values to internal status values
+    status_map = {
+        'success': 'completed',
+        'completed': 'completed',
+        'error': 'failed',
+        'failed': 'failed',
+    }
+
+    processed = 0
+    for item in results:
+        task_id = item.get('task_id')
+        raw_status = item.get('status', '')
+        status = status_map.get(raw_status)
+
+        if not task_id or not status:
+            continue
+
+        result_data = item.get('data')
+        error_message = item.get('message') if status == 'failed' else None
+
+        task = TaskService.complete_task(
+            task_id=task_id,
+            status=status,
+            result=result_data,
+            error_message=error_message,
+        )
+        if task is not None:
+            processed += 1
+
+    return jsonify({'status': 'processed', 'processed': processed})
