@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - BeakMeshWall{% endblock %}
+
+{% block content %}
+<div x-data="dashboardStats()" x-init="fetchStats(); startAutoRefresh()">
+    <h4 class="mb-4">Dashboard</h4>
+    <div class="row g-4">
+        <div class="col-md-4">
+            <div class="card bg-dark border-secondary">
+                <div class="card-body text-center">
+                    <h6 class="card-subtitle mb-2 text-secondary">Total Nodes</h6>
+                    <h2 class="card-title" x-text="total">{{ stats.total }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-dark border-secondary">
+                <div class="card-body text-center">
+                    <h6 class="card-subtitle mb-2 text-secondary">Online</h6>
+                    <h2 class="card-title text-success" x-text="online">{{ stats.online }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-dark border-secondary">
+                <div class="card-body text-center">
+                    <h6 class="card-subtitle mb-2 text-secondary">Offline</h6>
+                    <h2 class="card-title text-danger" x-text="offline">{{ stats.offline }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+    <p class="text-secondary mt-3" style="font-size: 0.85rem;">
+        Auto-refresh every 30s. Last updated: <span x-text="lastUpdated">--</span>
+    </p>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function dashboardStats() {
+    return {
+        total: {{ stats.total }},
+        online: {{ stats.online }},
+        offline: {{ stats.offline }},
+        lastUpdated: '--',
+        intervalId: null,
+
+        fetchStats() {
+            fetch('/api/v1/dashboard/stats', {
+                credentials: 'same-origin'
+            })
+            .then(r => r.json())
+            .then(data => {
+                this.total = data.total;
+                this.online = data.online;
+                this.offline = data.offline;
+                this.lastUpdated = new Date().toLocaleTimeString();
+            })
+            .catch(() => {});
+        },
+
+        startAutoRefresh() {
+            this.intervalId = setInterval(() => this.fetchStats(), 30000);
+        }
+    };
+}
+</script>
+{% endblock %}

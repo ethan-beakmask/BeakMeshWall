@@ -11,7 +11,7 @@ venv/
 env/
 
 # Go
-agent/beakguard-agent
+agent/beakmeshwall-agent
 *.exe
 *.dll
 *.so

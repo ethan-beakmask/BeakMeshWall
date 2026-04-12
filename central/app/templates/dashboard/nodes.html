@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Nodes - BeakMeshWall{% endblock %}
+
+{% block content %}
+<div x-data="nodeTable()" x-init="startAutoRefresh()">
+    <h4 class="mb-4">Node Inventory</h4>
+
+    <div class="table-responsive">
+        <table class="table table-dark table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th role="button" @click="sortBy('hostname')" style="cursor: pointer;">
+                        Hostname
+                        <span x-show="sortKey === 'hostname' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'hostname' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'hostname'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('ip_address')" style="cursor: pointer;">
+                        IP Address
+                        <span x-show="sortKey === 'ip_address' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'ip_address' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'ip_address'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th>OS</th>
+                    <th role="button" @click="sortBy('agent_version')" style="cursor: pointer;">
+                        Agent Version
+                        <span x-show="sortKey === 'agent_version' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'agent_version' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'agent_version'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('is_online')" style="cursor: pointer;">
+                        Status
+                        <span x-show="sortKey === 'is_online' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'is_online' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'is_online'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('last_heartbeat_at')" style="cursor: pointer;">
+                        Last Heartbeat
+                        <span x-show="sortKey === 'last_heartbeat_at' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'last_heartbeat_at' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'last_heartbeat_at'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="node in sortedNodes" :key="node.id">
+                    <tr>
+                        <td x-text="node.hostname"></td>
+                        <td x-text="node.ip_address || '--'"></td>
+                        <td x-text="node.os_info || '--'"></td>
+                        <td x-text="node.agent_version || '--'"></td>
+                        <td>
+                            <span class="badge"
+                                  :class="node.is_online ? 'bg-success' : 'bg-danger'"
+                                  x-text="node.is_online ? 'Online' : 'Offline'">
+                            </span>
+                        </td>
+                        <td x-text="formatTime(node.last_heartbeat_at)"></td>
+                    </tr>
+                </template>
+                <template x-if="nodes.length === 0">
+                    <tr>
+                        <td colspan="6" class="text-center text-secondary py-4">
+                            No nodes registered yet.
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="text-secondary" style="font-size: 0.85rem;">
+        <span x-text="nodes.length"></span> node(s).
+        Auto-refresh every 30s. Last updated: <span x-text="lastUpdated">--</span>
+    </p>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function nodeTable() {
+    return {
+        nodes: {{ nodes | tojson }},
+        sortKey: 'hostname',
+        sortAsc: true,
+        lastUpdated: '--',
+        intervalId: null,
+
+        get sortedNodes() {
+            let key = this.sortKey;
+            let asc = this.sortAsc;
+            return [...this.nodes].sort((a, b) => {
+                let va = a[key] ?? '';
+                let vb = b[key] ?? '';
+                if (typeof va === 'boolean') {
+                    va = va ? 1 : 0;
+                    vb = vb ? 1 : 0;
+                }
+                if (typeof va === 'string') {
+                    va = va.toLowerCase();
+                    vb = vb.toLowerCase();
+                }
+                if (va < vb) return asc ? -1 : 1;
+                if (va > vb) return asc ? 1 : -1;
+                return 0;
+            });
+        },
+
+        sortBy(key) {
+            if (this.sortKey === key) {
+                this.sortAsc = !this.sortAsc;
+            } else {
+                this.sortKey = key;
+                this.sortAsc = true;
+            }
+        },
+
+        formatTime(isoStr) {
+            if (!isoStr) return '--';
+            let d = new Date(isoStr);
+            return d.toLocaleString();
+        },
+
+        fetchNodes() {
+            fetch('/api/v1/dashboard/nodes', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                this.nodes = data.nodes;
+                this.lastUpdated = new Date().toLocaleTimeString();
+            })
+            .catch(() => {});
+        },
+
+        startAutoRefresh() {
+            this.lastUpdated = new Date().toLocaleTimeString();
+            this.intervalId = setInterval(() => this.fetchNodes(), 30000);
+        }
+    };
+}
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+[Unit]
+Description=BeakMeshWall Agent
+Documentation=https://github.com/your-org/beakmeshwall
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Agent requires root for nftables manipulation
+User=root
+
+ExecStart=/usr/local/bin/beakmeshwall-agent run --config /etc/beakmeshwall/agent.yaml
+
+Restart=always
+RestartSec=10
+
+# Limit restart burst to avoid runaway restarts
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# Security hardening (compatible with root + nftables access)
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

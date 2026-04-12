@@ -1,4 +1,4 @@
-# BeakGuard -- Multi-Host Firewall Management Center
+# BeakMeshWall -- Multi-Host Firewall Management Center
 
 獨立運行的多主機防火牆集中管理平台，不依賴外部認證系統。
 
@@ -76,13 +76,13 @@ Web UI: Flask + Jinja2 + Alpine.js + Bootstrap
 
 Agent 與 Docker/LXC 等子系統共存策略:
 
-| Table | 管理者 | BeakGuard 權限 | 備註 |
+| Table | 管理者 | BeakMeshWall 權限 | 備註 |
 |-------|--------|---------------|------|
-| `inet beakguard` (pri -150) | BeakGuard | 完全管理，唯一會 flush 的 table | priority -150 先於 Docker/LXC 評估 |
+| `inet beakmeshwall` (pri -150) | BeakMeshWall | 完全管理，唯一會 flush 的 table | priority -150 先於 Docker/LXC 評估 |
 | Docker tables | Docker | 唯讀觀察，標記 `external:docker` | ip nat/filter/raw, ip6 nat/filter |
 | LXC tables | LXC | 唯讀觀察，標記 `external:lxc` | inet lxc, ip lxc |
 
-**原則**: 各子系統管理自己的 nft table，BeakGuard 不碰。Agent 回報所有 table 但區分 managed/external，Central UI 對 external table 唯讀顯示禁止編輯。
+**原則**: 各子系統管理自己的 nft table，BeakMeshWall 不碰。Agent 回報所有 table 但區分 managed/external，Central UI 對 external table 唯讀顯示禁止編輯。
 
 ### 認證模型
 
@@ -130,7 +130,7 @@ Request body (POST):
 
 ### 與 BeakPlatform 的整合方式
 
-BeakGuard 不依賴 BeakPlatform，但可選擇性整合:
+BeakMeshWall 不依賴 BeakPlatform，但可選擇性整合:
 
 | 整合點 | 方式 | 說明 |
 |--------|------|------|
@@ -138,7 +138,7 @@ BeakGuard 不依賴 BeakPlatform，但可選擇性整合:
 | 管理員免登入操作 | API Key + 權限綁定 | BeakPlatform 後端持有 API Key |
 | 使用者 SSO | OIDC (未來) | 非必要，不影響核心功能 |
 
-**關鍵原則**: 判斷邏輯在來源系統（誰產生事件誰判斷），BeakGuard 只負責執行防火牆操作。
+**關鍵原則**: 判斷邏輯在來源系統（誰產生事件誰判斷），BeakMeshWall 只負責執行防火牆操作。
 
 ## Agent Pull 流程
 

@@ -1,4 +1,4 @@
-# BeakGuard -- 專案開發規範
+# BeakMeshWall -- 專案開發規範
 
 ## 專案定位
 獨立的多主機防火牆集中管理平台。不依賴 BeakPlatform 或任何外部認證系統即可運行。
@@ -13,12 +13,12 @@
 | 通訊 | Pull-based (Agent -> Central), mTLS |
 
 ## 架構原則
-- BeakGuard 獨立運行，Local Auth 為預設認證方式
+- BeakMeshWall 獨立運行，Local Auth 為預設認證方式
 - API Key 機制供外部系統 (System-to-System) 呼叫
 - Agent pull-based 通訊，不需在受管節點開 inbound port
-- nftables table 所有權: BeakGuard 只管 `inet beakguard` table (priority -150)
+- nftables table 所有權: BeakMeshWall 只管 `inet beakmeshwall` table (priority -150)
 - External tables (Docker/LXC) 唯讀觀察，絕不修改
-- 判斷邏輯歸來源系統，BeakGuard 只負責執行防火牆操作
+- 判斷邏輯歸來源系統，BeakMeshWall 只負責執行防火牆操作
 
 ## 目錄結構
 - `central/` -- Flask 應用程式 (Central Server)
@@ -27,8 +27,8 @@
 - `deploy/` -- 部署腳本與設定範例
 
 ## 開發階段
-- **P0**: Repo 骨架、文件 (current)
-- **P1**: Central API + Local Auth + Agent 註冊/心跳 + mTLS
+- **P0**: Repo 骨架、文件 (done)
+- **P1**: Central API + Local Auth + Agent 註冊/心跳 + mTLS (current)
 - **P2**: nftables Driver + 規則 CRUD + Threat Feed API
 - **P3**: Counters 回報 + External Table 觀察 + Audit Log
 - **P4**: iptables/pf Driver + OIDC 可選對接

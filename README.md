@@ -1,8 +1,8 @@
-# BeakGuard
+# BeakMeshWall
 
 Multi-host firewall management center. Manage firewall rules across multiple hosts from a single web interface.
 
-BeakGuard deploys lightweight Go agents on managed nodes that pull firewall rules from a central Flask server. Rules are abstracted through a unified driver layer supporting nftables, iptables, and pf.
+BeakMeshWall deploys lightweight Go agents on managed nodes that pull firewall rules from a central Flask server. Rules are abstracted through a unified driver layer supporting nftables, iptables, and pf.
 
 ## Features
 
@@ -35,15 +35,15 @@ Central Server (Flask)        Agent (Go) on each managed node
 
 - **Standalone**: No external authentication dependency. Built-in local auth + API key for system-to-system trust
 - **Pull-based**: Agents initiate outbound connections -- no inbound ports required on managed nodes
-- **Table ownership**: BeakGuard only manages `inet beakguard` table (priority -150). Docker/LXC tables are observed read-only
-- **Separation of concerns**: External systems decide *when* to block; BeakGuard executes *how* to block
+- **Table ownership**: BeakMeshWall only manages `inet beakmeshwall` table (priority -150). Docker/LXC tables are observed read-only
+- **Separation of concerns**: External systems decide *when* to block; BeakMeshWall executes *how* to block
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full design details.
 
 ## Project Structure
 
 ```
-BeakGuard/
+BeakMeshWall/
 ├── central/            # Central Server (Python/Flask)
 │   └── app/
 │       ├── auth/       # Authentication (local auth, API key)
@@ -86,8 +86,8 @@ python run.py --host 0.0.0.0 --port 5000
 
 ```bash
 cd agent
-go build -o beakguard-agent ./cmd/beakguard-agent/
-sudo ./beakguard-agent --config /etc/beakguard/agent.yaml
+go build -o beakmeshwall-agent ./cmd/beakmeshwall-agent/
+sudo ./beakmeshwall-agent --config /etc/beakmeshwall/agent.yaml
 ```
 
 ## Threat Feed API

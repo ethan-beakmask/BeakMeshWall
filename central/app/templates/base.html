@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}BeakMeshWall{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}">
+    <style>
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar {
+            min-width: 220px;
+            max-width: 220px;
+            min-height: calc(100vh - 56px);
+            background-color: #1a1d21;
+            border-right: 1px solid #2d3238;
+        }
+        .sidebar .nav-link {
+            color: #adb5bd;
+            padding: 0.6rem 1rem;
+            border-radius: 0;
+        }
+        .sidebar .nav-link:hover,
+        .sidebar .nav-link.active {
+            color: #fff;
+            background-color: #2d3238;
+        }
+        .main-content {
+            flex-grow: 1;
+            padding: 1.5rem;
+            background-color: #212529;
+        }
+        .navbar-brand {
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        footer {
+            background-color: #1a1d21;
+            border-top: 1px solid #2d3238;
+            padding: 0.5rem 1rem;
+            color: #6c757d;
+            font-size: 0.8rem;
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <!-- Top Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-secondary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('dashboard.index') }}">BeakMeshWall</a>
+            {% if current_user.is_authenticated %}
+            <div class="d-flex align-items-center">
+                <span class="text-secondary me-3">{{ current_user.display_name or current_user.username }}</span>
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('auth.logout') }}">Logout</a>
+            </div>
+            {% endif %}
+        </div>
+    </nav>
+
+    {% if current_user.is_authenticated %}
+    <div class="d-flex flex-grow-1">
+        <!-- Sidebar -->
+        <div class="sidebar d-flex flex-column pt-3">
+            <ul class="nav flex-column">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.index' %}active{% endif %}"
+                       href="{{ url_for('dashboard.index') }}">Dashboard</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.nodes' %}active{% endif %}"
+                       href="{{ url_for('dashboard.nodes') }}">Nodes</a>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+    {% else %}
+    <div class="flex-grow-1 d-flex align-items-center justify-content-center" style="background-color: #212529;">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div style="position: absolute; top: 80px; width: 400px;">
+                    {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        {% block content_anon %}{% endblock %}
+    </div>
+    {% endif %}
+
+    <footer class="text-center">
+        BeakMeshWall v0.1
+    </footer>
+
+    <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/alpine/alpine.min.js') }}" defer></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>
