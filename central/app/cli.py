@@ -15,6 +15,7 @@ from werkzeug.security import generate_password_hash
 from .extensions import db
 from .models.user import User
 from .models.api_key import RegistrationToken
+from .services.firewall_service import FirewallService
 
 
 def register_commands(app):
@@ -85,3 +86,18 @@ def register_commands(app):
         click.echo(f'  Expires at:  {expires_at.isoformat()}')
         click.echo('')
         click.echo('Save this token now -- it cannot be retrieved later.')
+
+    @app.cli.command('expire-rules')
+    def expire_rules():
+        """Manually expire stale firewall rules.
+
+        Finds active rules whose expires_at is in the past,
+        marks them as expired, and creates unblock tasks.
+        """
+        expired = FirewallService.expire_stale_rules()
+        if expired:
+            click.echo(f'Expired {len(expired)} rule(s).')
+            for rule in expired:
+                click.echo(f'  Rule #{rule.id}: {rule.ip_address}')
+        else:
+            click.echo('No expired rules found.')

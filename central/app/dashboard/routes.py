@@ -3,11 +3,24 @@ Dashboard web routes: main dashboard, node inventory, rules, tasks,
 threat feed, tables, audit log.
 """
 
-from flask import render_template
-from flask_login import login_required
+from functools import wraps
+
+from flask import render_template, abort
+from flask_login import login_required, current_user
 
 from . import dashboard_bp
 from ..services.node_service import NodeService
+
+
+def admin_required(f):
+    """Dashboard decorator: require authenticated admin user."""
+    @wraps(f)
+    @login_required
+    def decorated(*args, **kwargs):
+        if not current_user.is_admin:
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated
 
 
 @dashboard_bp.route('/')
@@ -60,3 +73,17 @@ def tables():
 def audit():
     """Render the audit log page."""
     return render_template('audit.html')
+
+
+@dashboard_bp.route('/users')
+@admin_required
+def users():
+    """Render the user management page (admin only)."""
+    return render_template('users.html')
+
+
+@dashboard_bp.route('/apikeys')
+@admin_required
+def apikeys():
+    """Render the API key management page (admin only)."""
+    return render_template('apikeys.html')

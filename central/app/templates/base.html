@@ -95,6 +95,19 @@
                        href="{{ url_for('dashboard.audit') }}">Audit Log</a>
                 </li>
             </ul>
+            {% if current_user.is_admin %}
+            <hr class="border-secondary mx-3 my-2">
+            <ul class="nav flex-column">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.users' %}active{% endif %}"
+                       href="{{ url_for('dashboard.users') }}">Users</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.apikeys' %}active{% endif %}"
+                       href="{{ url_for('dashboard.apikeys') }}">API Keys</a>
+                </li>
+            </ul>
+            {% endif %}
         </div>
 
         <!-- Main Content -->

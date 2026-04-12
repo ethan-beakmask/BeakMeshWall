@@ -14,6 +14,21 @@ from ..models.node import Node
 from ..models.api_key import APIKey
 
 
+def require_admin(f):
+    """Require an authenticated admin user via session cookie.
+
+    API keys are NOT accepted -- admin operations are UI-only.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'Authentication required.'}), 401
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required.'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 def require_agent_auth(f):
     """Verify Authorization: Bearer <agent_secret> against Node.agent_secret_hash.
 

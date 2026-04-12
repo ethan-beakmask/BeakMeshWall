@@ -72,8 +72,6 @@ BeakMeshWall/
 
 ## Quick Start
 
-> Under development. See [Roadmap](#roadmap) for current status.
-
 ### Central Server
 
 ```bash
@@ -114,11 +112,11 @@ curl https://central:5000/api/v1/threat/block \
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| P0 | Project skeleton, documentation | Current |
-| P1 | Central API + Agent registration/heartbeat + mTLS | Planned |
-| P2 | nftables driver + rule CRUD + Threat Feed API | Planned |
-| P3 | Counters, external table observation, audit log | Planned |
-| P4 | iptables/pf drivers, optional OIDC integration | Planned |
+| P0 | Project skeleton, documentation | Done |
+| P1 | Central API + Agent registration/heartbeat + mTLS | Done |
+| P2 | nftables driver + rule CRUD + Threat Feed API | Done |
+| P3 | Counters, external table observation, audit log | Done |
+| P4 | iptables/pf drivers, optional OIDC integration | Done |
 
 ## License
 

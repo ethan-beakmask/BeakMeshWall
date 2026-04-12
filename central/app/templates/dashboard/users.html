@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+{% block title %}Users - BeakMeshWall{% endblock %}
+
+{% block content %}
+<div x-data="userManager()" x-init="fetchUsers()">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="mb-0">User Management</h4>
+        <button class="btn btn-primary btn-sm" @click="showAdd = true">Add User</button>
+    </div>
+
+    <!-- Alert -->
+    <div x-show="alert.text" x-transition class="alert alert-dismissible fade show"
+         :class="'alert-' + alert.type" role="alert">
+        <span x-text="alert.text"></span>
+        <button type="button" class="btn-close" @click="alert.text = ''"></button>
+    </div>
+
+    <!-- Users table -->
+    <div class="table-responsive">
+        <table class="table table-dark table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th role="button" @click="sortBy('username')" style="cursor: pointer;">
+                        Username
+                        <span x-show="sortKey === 'username' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'username' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'username'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th>Display Name</th>
+                    <th role="button" @click="sortBy('role')" style="cursor: pointer;">
+                        Role
+                        <span x-show="sortKey === 'role' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'role' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'role'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('is_active')" style="cursor: pointer;">
+                        Status
+                        <span x-show="sortKey === 'is_active' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'is_active' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'is_active'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('last_login_at')" style="cursor: pointer;">
+                        Last Login
+                        <span x-show="sortKey === 'last_login_at' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'last_login_at' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'last_login_at'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th role="button" @click="sortBy('created_at')" style="cursor: pointer;">
+                        Created
+                        <span x-show="sortKey === 'created_at' && sortAsc" class="ms-1">&#9650;</span>
+                        <span x-show="sortKey === 'created_at' && !sortAsc" class="ms-1">&#9660;</span>
+                        <span x-show="sortKey !== 'created_at'" class="ms-1 text-secondary">&#9650;&#9660;</span>
+                    </th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="u in sortedUsers" :key="u.id">
+                    <tr>
+                        <td x-text="u.username"></td>
+                        <td x-text="u.display_name || '--'"></td>
+                        <td>
+                            <span class="badge"
+                                  :class="u.role === 'admin' ? 'bg-danger' : u.role === 'operator' ? 'bg-warning text-dark' : 'bg-secondary'"
+                                  x-text="u.role"></span>
+                        </td>
+                        <td>
+                            <span class="badge"
+                                  :class="u.is_active ? 'bg-success' : 'bg-danger'"
+                                  x-text="u.is_active ? 'Active' : 'Inactive'"></span>
+                        </td>
+                        <td x-text="formatTime(u.last_login_at)"></td>
+                        <td x-text="formatTime(u.created_at)"></td>
+                        <td>
+                            <button class="btn btn-outline-light btn-sm me-1"
+                                    @click="openEdit(u)">Edit</button>
+                            <button class="btn btn-outline-danger btn-sm"
+                                    :disabled="u.id === currentUserId"
+                                    @click="confirmDelete(u)">Delete</button>
+                        </td>
+                    </tr>
+                </template>
+                <template x-if="users.length === 0">
+                    <tr>
+                        <td colspan="7" class="text-center text-secondary py-4">No users found.</td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="text-secondary" style="font-size: 0.85rem;">
+        <span x-text="users.length"></span> user(s).
+    </p>
+
+    <!-- Add User Modal -->
+    <div x-show="showAdd" class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,.6);">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Add User</h5>
+                    <button type="button" class="btn-close btn-close-white" @click="showAdd = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" x-model="addForm.username" maxlength="80">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Display Name</label>
+                        <input type="text" class="form-control" x-model="addForm.display_name" maxlength="120">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" x-model="addForm.password">
+                        <div class="form-text">Minimum 8 characters.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role</label>
+                        <select class="form-select" x-model="addForm.role">
+                            <option value="viewer">viewer</option>
+                            <option value="operator">operator</option>
+                            <option value="admin">admin</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button class="btn btn-secondary" @click="showAdd = false">Cancel</button>
+                    <button class="btn btn-primary" @click="submitAdd()" :disabled="submitting">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div x-show="showEdit" class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,.6);">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Edit User: <span x-text="editForm.username"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" @click="showEdit = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Display Name</label>
+                        <input type="text" class="form-control" x-model="editForm.display_name" maxlength="120">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role</label>
+                        <select class="form-select" x-model="editForm.role"
+                                :disabled="editForm.id === currentUserId">
+                            <option value="viewer">viewer</option>
+                            <option value="operator">operator</option>
+                            <option value="admin">admin</option>
+                        </select>
+                        <div x-show="editForm.id === currentUserId" class="form-text text-warning">
+                            Cannot change your own role.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" x-model="editForm.is_active"
+                                :disabled="editForm.id === currentUserId">
+                            <option :value="true">Active</option>
+                            <option :value="false">Inactive</option>
+                        </select>
+                    </div>
+                    <hr class="border-secondary">
+                    <div class="mb-3">
+                        <label class="form-label">New Password (leave empty to keep current)</label>
+                        <input type="password" class="form-control" x-model="editForm.password">
+                        <div class="form-text">Minimum 8 characters if changing.</div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button class="btn btn-secondary" @click="showEdit = false">Cancel</button>
+                    <button class="btn btn-primary" @click="submitEdit()" :disabled="submitting">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div x-show="showDelete" class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,.6);">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Confirm Delete</h5>
+                    <button type="button" class="btn-close btn-close-white" @click="showDelete = false"></button>
+                </div>
+                <div class="modal-body">
+                    Delete user <strong x-text="deleteTarget.username"></strong>?
+                    This cannot be undone.
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button class="btn btn-secondary" @click="showDelete = false">Cancel</button>
+                    <button class="btn btn-danger" @click="submitDelete()" :disabled="submitting">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function userManager() {
+    return {
+        users: [],
+        sortKey: 'username',
+        sortAsc: true,
+        alert: { text: '', type: 'info' },
+        submitting: false,
+        currentUserId: {{ current_user.id }},
+
+        showAdd: false,
+        addForm: { username: '', display_name: '', password: '', role: 'viewer' },
+
+        showEdit: false,
+        editForm: { id: null, username: '', display_name: '', role: 'viewer', is_active: true, password: '' },
+
+        showDelete: false,
+        deleteTarget: { id: null, username: '' },
+
+        get sortedUsers() {
+            let key = this.sortKey;
+            let asc = this.sortAsc;
+            return [...this.users].sort((a, b) => {
+                let va = a[key] ?? '';
+                let vb = b[key] ?? '';
+                if (typeof va === 'boolean') { va = va ? 1 : 0; vb = vb ? 1 : 0; }
+                if (typeof va === 'string') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+                if (va < vb) return asc ? -1 : 1;
+                if (va > vb) return asc ? 1 : -1;
+                return 0;
+            });
+        },
+
+        sortBy(key) {
+            if (this.sortKey === key) { this.sortAsc = !this.sortAsc; }
+            else { this.sortKey = key; this.sortAsc = true; }
+        },
+
+        formatTime(iso) {
+            if (!iso) return '--';
+            return new Date(iso).toLocaleString();
+        },
+
+        showAlert(text, type) {
+            this.alert = { text, type };
+            setTimeout(() => { this.alert.text = ''; }, 5000);
+        },
+
+        fetchUsers() {
+            fetch('/api/v1/admin/users', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => { this.users = data.users; })
+            .catch(() => {});
+        },
+
+        openEdit(u) {
+            this.editForm = {
+                id: u.id,
+                username: u.username,
+                display_name: u.display_name || '',
+                role: u.role,
+                is_active: u.is_active,
+                password: '',
+            };
+            this.showEdit = true;
+        },
+
+        confirmDelete(u) {
+            this.deleteTarget = { id: u.id, username: u.username };
+            this.showDelete = true;
+        },
+
+        submitAdd() {
+            this.submitting = true;
+            fetch('/api/v1/admin/users', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this._csrf() },
+                body: JSON.stringify(this.addForm),
+            })
+            .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+            .then(({ ok, data }) => {
+                if (!ok) { this.showAlert(data.error || 'Failed.', 'danger'); return; }
+                this.showAdd = false;
+                this.addForm = { username: '', display_name: '', password: '', role: 'viewer' };
+                this.showAlert('User created.', 'success');
+                this.fetchUsers();
+            })
+            .catch(() => this.showAlert('Request failed.', 'danger'))
+            .finally(() => { this.submitting = false; });
+        },
+
+        submitEdit() {
+            this.submitting = true;
+            let payload = {
+                display_name: this.editForm.display_name,
+                role: this.editForm.role,
+                is_active: this.editForm.is_active,
+            };
+            if (this.editForm.password) payload.password = this.editForm.password;
+
+            fetch('/api/v1/admin/users/' + this.editForm.id, {
+                method: 'PUT',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this._csrf() },
+                body: JSON.stringify(payload),
+            })
+            .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+            .then(({ ok, data }) => {
+                if (!ok) { this.showAlert(data.error || 'Failed.', 'danger'); return; }
+                this.showEdit = false;
+                this.showAlert('User updated.', 'success');
+                this.fetchUsers();
+            })
+            .catch(() => this.showAlert('Request failed.', 'danger'))
+            .finally(() => { this.submitting = false; });
+        },
+
+        submitDelete() {
+            this.submitting = true;
+            fetch('/api/v1/admin/users/' + this.deleteTarget.id, {
+                method: 'DELETE',
+                credentials: 'same-origin',
+                headers: { 'X-CSRFToken': this._csrf() },
+            })
+            .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+            .then(({ ok, data }) => {
+                if (!ok) { this.showAlert(data.error || 'Failed.', 'danger'); return; }
+                this.showDelete = false;
+                this.showAlert('User deleted.', 'success');
+                this.fetchUsers();
+            })
+            .catch(() => this.showAlert('Request failed.', 'danger'))
+            .finally(() => { this.submitting = false; });
+        },
+
+        _csrf() {
+            let el = document.querySelector('meta[name="csrf-token"]');
+            if (el) return el.getAttribute('content');
+            let cookie = document.cookie.split(';').find(c => c.trim().startsWith('csrf_token='));
+            return cookie ? cookie.split('=')[1] : '';
+        },
+    };
+}
+</script>
+{% endblock %}

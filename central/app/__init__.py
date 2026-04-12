@@ -7,6 +7,7 @@ from flask import Flask, redirect, url_for
 from .config import config_map
 from .extensions import db, migrate, login_manager, csrf
 from .auth.oidc import init_oidc
+from .scheduler import init_scheduler
 
 
 def create_app(config_name=None):
@@ -50,6 +51,9 @@ def create_app(config_name=None):
     # Register CLI commands
     from . import cli
     cli.register_commands(app)
+
+    # Start background scheduler (rule expiry, etc.)
+    init_scheduler(app)
 
     # Root route redirects to dashboard
     @app.route('/')

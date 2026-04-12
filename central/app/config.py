@@ -48,6 +48,9 @@ class BaseConfig:
     # Heartbeat timeout: node considered offline after this many seconds
     HEARTBEAT_TIMEOUT_SECONDS = int(os.environ.get('BMW_HEARTBEAT_TIMEOUT', '90'))
 
+    # How often (seconds) the background scheduler checks for expired rules
+    RULE_EXPIRY_CHECK_INTERVAL = int(os.environ.get('BMW_RULE_EXPIRY_INTERVAL', '60'))
+
 
 class DevelopmentConfig(BaseConfig):
     """Development environment configuration."""
