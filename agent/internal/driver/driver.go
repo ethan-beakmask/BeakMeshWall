@@ -13,10 +13,10 @@ type Driver interface {
 	// Close cleans up driver resources.
 	Close() error
 
-	// BlockIP adds a block rule for the given IP address.
+	// BlockIP adds a block rule for the given IP address or CIDR block.
 	BlockIP(ip string, comment string) error
 
-	// UnblockIP removes the block rule for the given IP address.
+	// UnblockIP removes the block rule for the given IP address or CIDR block.
 	UnblockIP(ip string) error
 
 	// ListRules returns all rules in the managed table.

@@ -16,9 +16,14 @@ from ..services.audit_service import AuditService
 
 
 def _validate_ip(ip_str):
-    """Return True if ip_str is a valid IPv4 or IPv6 address."""
+    """Return True if ip_str is a valid IPv4/IPv6 address or CIDR block."""
     try:
         ipaddress.ip_address(ip_str)
+        return True
+    except (ValueError, TypeError):
+        pass
+    try:
+        ipaddress.ip_network(ip_str, strict=False)
         return True
     except (ValueError, TypeError):
         return False
@@ -54,7 +59,7 @@ def threat_block_create():
         return jsonify({'error': '"ip" is required.'}), 400
 
     if not _validate_ip(ip_addr):
-        return jsonify({'error': f'Invalid IP address: {ip_addr}'}), 400
+        return jsonify({'error': f'Invalid IP address or CIDR: {ip_addr}'}), 400
 
     source = data.get('source', 'external').strip()
     reason = data.get('reason', '')
@@ -113,7 +118,7 @@ def threat_block_remove(ip_addr):
     ip_addr = ip_addr.strip()
 
     if not _validate_ip(ip_addr):
-        return jsonify({'error': f'Invalid IP address: {ip_addr}'}), 400
+        return jsonify({'error': f'Invalid IP address or CIDR: {ip_addr}'}), 400
 
     api_key_name = g.current_api_key.name
     created_by = f'api:{api_key_name}'

@@ -17,3 +17,4 @@ from . import tasks_api  # noqa: E402, F401 -- register task query routes
 from . import audit_api  # noqa: E402, F401 -- register audit log routes
 from . import tables_api  # noqa: E402, F401 -- register tables/counters routes
 from . import admin_api  # noqa: E402, F401 -- register admin management routes
+from . import health_api  # noqa: E402, F401 -- register health check endpoint

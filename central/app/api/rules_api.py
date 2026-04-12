@@ -21,9 +21,14 @@ VALID_STATUS_FILTERS = ('active', 'expired', 'removed')
 
 
 def _validate_ip(ip_str):
-    """Return True if ip_str is a valid IPv4 or IPv6 address."""
+    """Return True if ip_str is a valid IPv4/IPv6 address or CIDR block."""
     try:
         ipaddress.ip_address(ip_str)
+        return True
+    except (ValueError, TypeError):
+        pass
+    try:
+        ipaddress.ip_network(ip_str, strict=False)
         return True
     except (ValueError, TypeError):
         return False
@@ -103,7 +108,7 @@ def create_rule():
         return jsonify({'error': '"ip_address" is required.'}), 400
 
     if not _validate_ip(ip_address):
-        return jsonify({'error': f'Invalid IP address: {ip_address}'}), 400
+        return jsonify({'error': f'Invalid IP address or CIDR: {ip_address}'}), 400
 
     rule_type = data.get('rule_type', 'block')
     if rule_type not in VALID_RULE_TYPES:

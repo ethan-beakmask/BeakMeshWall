@@ -113,13 +113,13 @@ func (d *IptablesDriver) Close() error {
 	return nil
 }
 
-// BlockIP adds a DROP rule for the given IP in the managed chain.
+// BlockIP adds a DROP rule for the given IP or CIDR block in the managed chain.
 // It uses a structured comment tag "bmw:<ip> | <comment>" for identification.
 // Duplicate rules are detected and skipped.
 func (d *IptablesDriver) BlockIP(ip string, comment string) error {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return fmt.Errorf("invalid IP address: %q", ip)
+	parsed, ok := parseIPOrCIDR(ip)
+	if !ok {
+		return fmt.Errorf("invalid IP address or CIDR: %q", ip)
 	}
 
 	if comment == "" {
@@ -150,13 +150,13 @@ func (d *IptablesDriver) BlockIP(ip string, comment string) error {
 	return nil
 }
 
-// UnblockIP removes all DROP rules matching the given IP from the managed chain.
-// It is idempotent: returns nil if no matching rules are found.
+// UnblockIP removes all DROP rules matching the given IP or CIDR block from the
+// managed chain. It is idempotent: returns nil if no matching rules are found.
 // Rules are deleted from highest line number to lowest to avoid index shifting.
 func (d *IptablesDriver) UnblockIP(ip string) error {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return fmt.Errorf("invalid IP address: %q", ip)
+	parsed, ok := parseIPOrCIDR(ip)
+	if !ok {
+		return fmt.Errorf("invalid IP address or CIDR: %q", ip)
 	}
 
 	binary := d.binaryForIP(parsed)
@@ -186,8 +186,9 @@ func (d *IptablesDriver) deleteRulesByTag(binary, tag string) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Only process lines that contain our tag
-		if !strings.Contains(line, tag) {
+		// Only process lines that contain our tag.
+		// Append " " to prevent false prefix matches (e.g. bmw:10.0.0.1 vs bmw:10.0.0.10).
+		if !strings.Contains(line, tag+" ") {
 			continue
 		}
 
@@ -449,6 +450,19 @@ func runCmd(logger *slog.Logger, name string, args ...string) (string, error) {
 	}
 
 	return output, nil
+}
+
+// parseIPOrCIDR accepts a single IP address ("10.0.0.1") or a CIDR block
+// ("10.0.0.0/24") and returns a net.IP suitable for address-family detection.
+func parseIPOrCIDR(s string) (net.IP, bool) {
+	if ip := net.ParseIP(s); ip != nil {
+		return ip, true
+	}
+	_, ipNet, err := net.ParseCIDR(s)
+	if err != nil {
+		return nil, false
+	}
+	return ipNet.IP, true
 }
 
 // Ensure IptablesDriver satisfies the Driver interface at compile time.

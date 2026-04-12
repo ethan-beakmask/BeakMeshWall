@@ -109,13 +109,14 @@ func (d *NftDriver) Close() error {
 	return nil
 }
 
-// BlockIP adds drop rules for the specified IP in both the managed input and
-// forward chains. It uses a structured comment tag "bmw:<ip>" so rules can be
-// identified for later removal. Works with both IPv4 and IPv6 addresses.
+// BlockIP adds drop rules for the specified IP or CIDR block in both the
+// managed input and forward chains. It uses a structured comment tag
+// "bmw:<ip>" so rules can be identified for later removal. Works with
+// both IPv4 and IPv6 addresses and CIDR notation (e.g. 10.0.0.0/24).
 func (d *NftDriver) BlockIP(ip string, comment string) error {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return fmt.Errorf("invalid IP address: %q", ip)
+	parsed, ok := parseIPOrCIDR(ip)
+	if !ok {
+		return fmt.Errorf("invalid IP address or CIDR: %q", ip)
 	}
 
 	if comment == "" {
@@ -150,13 +151,13 @@ func (d *NftDriver) BlockIP(ip string, comment string) error {
 	return nil
 }
 
-// UnblockIP removes all drop rules matching the specified IP from both the
-// managed input and forward chains. It is idempotent: returns nil if no
-// matching rules are found.
+// UnblockIP removes all drop rules matching the specified IP or CIDR block
+// from both the managed input and forward chains. It is idempotent: returns
+// nil if no matching rules are found.
 func (d *NftDriver) UnblockIP(ip string) error {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return fmt.Errorf("invalid IP address: %q", ip)
+	_, ok := parseIPOrCIDR(ip)
+	if !ok {
+		return fmt.Errorf("invalid IP address or CIDR: %q", ip)
 	}
 
 	tag := commentPrefix + ip
@@ -194,8 +195,9 @@ func (d *NftDriver) deleteRulesByTag(chain, tag string) error {
 		}
 		commentText := commentMatch[1]
 
-		// The tag must be the prefix of the comment (before the " | " separator)
-		if !strings.HasPrefix(commentText, tag) {
+		// The tag must be the prefix of the comment (before the " | " separator).
+		// Append " " to prevent false prefix matches (e.g. bmw:10.0.0.1 vs bmw:10.0.0.10).
+		if !strings.HasPrefix(commentText, tag+" ") {
 			continue
 		}
 
@@ -357,6 +359,19 @@ func (d *NftDriver) runNft(args ...string) (string, error) {
 	}
 
 	return output, nil
+}
+
+// parseIPOrCIDR accepts a single IP address ("10.0.0.1") or a CIDR block
+// ("10.0.0.0/24") and returns a net.IP suitable for address-family detection.
+func parseIPOrCIDR(s string) (net.IP, bool) {
+	if ip := net.ParseIP(s); ip != nil {
+		return ip, true
+	}
+	_, ipNet, err := net.ParseCIDR(s)
+	if err != nil {
+		return nil, false
+	}
+	return ipNet.IP, true
 }
 
 // Ensure NftDriver satisfies the Driver interface at compile time.
