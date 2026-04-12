@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anthropics/BeakMeshWall/agent/internal/driver"
 	"github.com/anthropics/BeakMeshWall/agent/internal/module"
 )
 
@@ -38,8 +39,26 @@ type TaskResult struct {
 }
 
 // ReportRequest is the payload sent to POST /api/v1/agent/report.
+// It includes task results and supplementary data (counters, tables)
+// collected proactively by the agent every poll cycle.
 type ReportRequest struct {
-	Results []TaskResult `json:"results"`
+	Results  []TaskResult `json:"results"`
+	Counters *CounterData `json:"counters,omitempty"`
+	Tables   []TableData  `json:"tables,omitempty"`
+}
+
+// CounterData holds firewall rule counters collected from the driver.
+type CounterData struct {
+	Rules       []driver.Rule `json:"rules"`
+	CollectedAt string        `json:"collected_at"` // RFC3339
+}
+
+// TableData holds nftables table inventory information.
+type TableData struct {
+	Name     string `json:"name"`
+	Family   string `json:"family"`
+	Managed  bool   `json:"managed"`
+	External string `json:"external"`
 }
 
 // ReportResponse is the response from POST /api/v1/agent/report.
@@ -137,7 +156,8 @@ func StartPollLoop(ctx context.Context, client *Client, registry *module.Registr
 	}
 }
 
-// poll performs a single poll cycle: fetch tasks, dispatch via registry, report results.
+// poll performs a single poll cycle: fetch tasks, dispatch via registry,
+// collect supplementary data (counters, tables), and report everything.
 func poll(ctx context.Context, client *Client, registry *module.Registry, logger *slog.Logger) error {
 	// Check context before making the request
 	if ctx.Err() != nil {
@@ -166,57 +186,91 @@ func poll(ctx context.Context, client *Client, registry *module.Registry, logger
 	}
 
 	// Process tasks
+	var results []TaskResult
 	if len(pollResp.Tasks) == 0 {
 		logger.Debug("no pending tasks")
-		return nil
+	} else {
+		logger.Info("received tasks", "count", len(pollResp.Tasks))
+
+		for _, task := range pollResp.Tasks {
+			logger.Info("dispatching task",
+				"task_id", task.ID,
+				"module", task.Module,
+				"action", task.Action,
+			)
+
+			// Convert client.Task to module.Task for dispatch
+			modTask := module.Task{
+				ID:     task.ID,
+				Module: task.Module,
+				Action: task.Action,
+				Params: task.Params,
+			}
+
+			modResult := registry.Dispatch(modTask)
+
+			results = append(results, TaskResult{
+				TaskID:  modResult.TaskID,
+				Status:  modResult.Status,
+				Message: modResult.Message,
+				Data:    modResult.Data,
+			})
+		}
 	}
 
-	logger.Info("received tasks", "count", len(pollResp.Tasks))
+	// Collect supplementary data for reporting
+	var counterData *CounterData
+	var tableData []TableData
 
-	var results []TaskResult
-	for _, task := range pollResp.Tasks {
-		logger.Info("dispatching task",
-			"task_id", task.ID,
-			"module", task.Module,
-			"action", task.Action,
-		)
+	// Get firewall module to access driver for counter/table collection
+	if fwMod, ok := registry.GetModule("firewall"); ok {
+		if fw, ok := fwMod.(*module.FirewallModule); ok {
+			drv := fw.Driver()
 
-		// Convert client.Task to module.Task for dispatch
-		modTask := module.Task{
-			ID:     task.ID,
-			Module: task.Module,
-			Action: task.Action,
-			Params: task.Params,
+			// Collect rule counters
+			if rules, err := drv.ListRules(); err == nil {
+				counterData = &CounterData{
+					Rules:       rules,
+					CollectedAt: time.Now().UTC().Format(time.RFC3339),
+				}
+			} else {
+				logger.Debug("failed to collect counters", "error", err)
+			}
+
+			// Collect table inventory
+			if tables, err := drv.ListTables(); err == nil {
+				for _, t := range tables {
+					tableData = append(tableData, TableData{
+						Name:     t.Name,
+						Family:   t.Family,
+						Managed:  t.Managed,
+						External: t.External,
+					})
+				}
+			} else {
+				logger.Debug("failed to collect tables", "error", err)
+			}
 		}
-
-		modResult := registry.Dispatch(modTask)
-
-		results = append(results, TaskResult{
-			TaskID:  modResult.TaskID,
-			Status:  modResult.Status,
-			Message: modResult.Message,
-			Data:    modResult.Data,
-		})
 	}
 
-	// Report results back to Central
-	if len(results) > 0 {
-		if err := report(client, results, logger); err != nil {
-			logger.Warn("failed to report task results", "error", err)
-			// Non-fatal: tasks were executed, report failure should not stop polling
-		}
+	// Always report, even with empty task results, to send counters/tables
+	reportReq := ReportRequest{
+		Results:  results,
+		Counters: counterData,
+		Tables:   tableData,
+	}
+
+	if err := report(client, reportReq, logger); err != nil {
+		logger.Warn("failed to report results", "error", err)
+		// Non-fatal: tasks were executed, report failure should not stop polling
 	}
 
 	return nil
 }
 
-// report sends task results back to the Central Server.
-func report(client *Client, results []TaskResult, logger *slog.Logger) error {
-	reqBody := ReportRequest{
-		Results: results,
-	}
-
-	resp, err := client.doPost("/api/v1/agent/report", reqBody)
+// report sends task results and supplementary data back to the Central Server.
+func report(client *Client, req ReportRequest, logger *slog.Logger) error {
+	resp, err := client.doPost("/api/v1/agent/report", req)
 	if err != nil {
 		return fmt.Errorf("report request: %w", err)
 	}
@@ -226,7 +280,12 @@ func report(client *Client, results []TaskResult, logger *slog.Logger) error {
 		return fmt.Errorf("decode report response: %w", err)
 	}
 
-	logger.Debug("task results reported", "status", reportResp.Status, "count", len(results))
+	logger.Debug("report sent",
+		"status", reportResp.Status,
+		"task_results", len(req.Results),
+		"has_counters", req.Counters != nil,
+		"table_count", len(req.Tables),
+	)
 	return nil
 }
 

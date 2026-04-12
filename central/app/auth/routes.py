@@ -10,6 +10,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from . import auth_bp
 from ..extensions import db
 from ..models.user import User
+from ..services.audit_service import AuditService
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
@@ -42,6 +43,15 @@ def login():
         user.last_login_at = datetime.now(timezone.utc)
         db.session.commit()
 
+        # Audit: successful login
+        AuditService.log(
+            actor=f'user:{username}',
+            action='login',
+            resource_type='user',
+            resource_id=user.id,
+            ip_address=request.remote_addr,
+        )
+
         next_page = request.args.get('next')
         if next_page and next_page.startswith('/'):
             return redirect(next_page)
@@ -54,6 +64,17 @@ def login():
 @login_required
 def logout():
     """Log the current user out and redirect to login."""
+    username = current_user.username
+
+    # Audit: logout
+    AuditService.log(
+        actor=f'user:{username}',
+        action='logout',
+        resource_type='user',
+        resource_id=current_user.id,
+        ip_address=request.remote_addr,
+    )
+
     logout_user()
     flash('You have been logged out.', 'info')
     return redirect(url_for('auth.login'))

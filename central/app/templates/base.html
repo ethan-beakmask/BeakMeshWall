@@ -86,6 +86,14 @@
                     <a class="nav-link {% if request.endpoint == 'dashboard.tasks' %}active{% endif %}"
                        href="{{ url_for('dashboard.tasks') }}">Tasks</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.tables' %}active{% endif %}"
+                       href="{{ url_for('dashboard.tables') }}">Tables</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard.audit' %}active{% endif %}"
+                       href="{{ url_for('dashboard.audit') }}">Audit Log</a>
+                </li>
             </ul>
         </div>
 

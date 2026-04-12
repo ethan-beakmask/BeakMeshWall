@@ -45,6 +45,13 @@ func (r *Registry) Register(m Module) {
 	r.modules[m.Name()] = m
 }
 
+// GetModule retrieves a registered module by name.
+// Returns the module and true if found, or nil and false otherwise.
+func (r *Registry) GetModule(name string) (Module, bool) {
+	m, ok := r.modules[name]
+	return m, ok
+}
+
 // Dispatch routes a task to the appropriate module and returns the result.
 // If no module matches the task's Module field, an error result is returned.
 func (r *Registry) Dispatch(task Task) TaskResult {

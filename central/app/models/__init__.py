@@ -7,6 +7,7 @@ from .node import Node
 from .api_key import APIKey, RegistrationToken
 from .task import Task
 from .firewall_rule import FirewallRule
+from .audit_log import AuditLog
 
 __all__ = [
     'User',
@@ -15,4 +16,5 @@ __all__ = [
     'RegistrationToken',
     'Task',
     'FirewallRule',
+    'AuditLog',
 ]

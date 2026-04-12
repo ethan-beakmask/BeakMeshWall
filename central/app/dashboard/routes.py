@@ -1,5 +1,6 @@
 """
-Dashboard web routes: main dashboard, node inventory, rules, tasks, threat feed.
+Dashboard web routes: main dashboard, node inventory, rules, tasks,
+threat feed, tables, audit log.
 """
 
 from flask import render_template
@@ -44,3 +45,18 @@ def tasks():
 def threat():
     """Render the threat feed block list page."""
     return render_template('threat.html')
+
+
+@dashboard_bp.route('/tables')
+@login_required
+def tables():
+    """Render the nftables external table observation page."""
+    node_list = NodeService.get_all_nodes()
+    return render_template('tables.html', nodes=node_list)
+
+
+@dashboard_bp.route('/audit')
+@login_required
+def audit():
+    """Render the audit log page."""
+    return render_template('audit.html')

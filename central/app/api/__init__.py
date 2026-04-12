@@ -14,3 +14,5 @@ from . import dashboard_api  # noqa: E402, F401 -- register dashboard stats rout
 from . import rules_api  # noqa: E402, F401 -- register firewall rules CRUD routes
 from . import threat_api  # noqa: E402, F401 -- register threat feed routes
 from . import tasks_api  # noqa: E402, F401 -- register task query routes
+from . import audit_api  # noqa: E402, F401 -- register audit log routes
+from . import tables_api  # noqa: E402, F401 -- register tables/counters routes

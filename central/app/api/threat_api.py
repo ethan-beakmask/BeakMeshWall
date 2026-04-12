@@ -12,6 +12,7 @@ from flask import request, jsonify, g
 from . import api_bp
 from .decorators import require_api_key
 from ..services.firewall_service import FirewallService
+from ..services.audit_service import AuditService
 
 
 def _validate_ip(ip_str):
@@ -80,6 +81,20 @@ def threat_block_create():
         created_by=created_by,
     )
 
+    # Audit: threat block
+    AuditService.log(
+        actor=created_by,
+        action='block_threat',
+        resource_type='rule',
+        resource_id=rule.id,
+        detail={
+            'ip_address': ip_addr,
+            'source': source,
+            'reason': reason,
+        },
+        ip_address=request.remote_addr,
+    )
+
     return jsonify({
         'status': 'accepted',
         'rule_id': rule.id,
@@ -110,6 +125,19 @@ def threat_block_remove(ip_addr):
 
     if not removed:
         return jsonify({'error': 'No active block found for this IP.'}), 404
+
+    # Audit: threat unblock
+    AuditService.log(
+        actor=created_by,
+        action='unblock_threat',
+        resource_type='rule',
+        resource_id=None,
+        detail={
+            'ip_address': ip_addr,
+            'rules_removed': len(removed),
+        },
+        ip_address=request.remote_addr,
+    )
 
     return jsonify({
         'status': 'removed',

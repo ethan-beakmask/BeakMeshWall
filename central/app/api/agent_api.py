@@ -14,6 +14,7 @@ from ..extensions import db
 from ..models.node import Node
 from ..models.api_key import RegistrationToken
 from ..services.task_service import TaskService
+from ..services.audit_service import AuditService
 
 
 @api_bp.route('/agent/register', methods=['POST'])
@@ -82,6 +83,20 @@ def agent_register():
     db.session.add(node)
     db.session.commit()
 
+    # Audit: node registration
+    AuditService.log(
+        actor='system',
+        action='register_node',
+        resource_type='node',
+        resource_id=node.id,
+        detail={
+            'hostname': hostname,
+            'ip_address': node.ip_address,
+            'agent_version': node.agent_version,
+        },
+        ip_address=request.remote_addr,
+    )
+
     poll_interval = current_app.config.get('AGENT_POLL_INTERVAL', 30)
 
     return jsonify({
@@ -124,7 +139,7 @@ def agent_poll():
 @api_bp.route('/agent/report', methods=['POST'])
 @require_agent_auth
 def agent_report():
-    """Agent reports task execution results.
+    """Agent reports task execution results, counters, and table info.
 
     Expects JSON body:
         {
@@ -135,6 +150,13 @@ def agent_report():
                     "message": "optional description",
                     "data": { ... optional result data ... }
                 }
+            ],
+            "counters": {
+                "rules": [...],
+                "collected_at": "2026-04-12T23:00:00Z"
+            },
+            "tables": [
+                {"name": "beakmeshwall", "family": "inet", "managed": true, "external": ""}
             ]
         }
 
@@ -148,6 +170,9 @@ def agent_report():
     results = data.get('results', [])
     if not isinstance(results, list):
         return jsonify({'error': '"results" must be an array.'}), 400
+
+    node = g.current_node
+    actor = f'agent:{node.id}'
 
     # Map agent status values to internal status values
     status_map = {
@@ -177,5 +202,34 @@ def agent_report():
         )
         if task is not None:
             processed += 1
+
+            # Audit: task completion or failure
+            audit_action = 'task_completed' if status == 'completed' else 'task_failed'
+            AuditService.log(
+                actor=actor,
+                action=audit_action,
+                resource_type='task',
+                resource_id=task_id,
+                detail={
+                    'module': task.module,
+                    'task_action': task.action,
+                    'error_message': error_message,
+                },
+                ip_address=request.remote_addr,
+            )
+
+    # Store counters if present
+    counters = data.get('counters')
+    if counters is not None:
+        node.last_counters = counters
+
+    # Store tables if present
+    tables = data.get('tables')
+    if tables is not None:
+        node.last_tables = tables
+
+    # Always update last_report_at
+    node.last_report_at = datetime.now(timezone.utc)
+    db.session.commit()
 
     return jsonify({'status': 'processed', 'processed': processed})

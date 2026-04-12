@@ -11,6 +11,7 @@ from flask import request, jsonify, g
 from . import api_bp
 from .decorators import require_auth
 from ..services.firewall_service import FirewallService
+from ..services.audit_service import AuditService
 
 
 VALID_RULE_TYPES = ('block', 'allow', 'custom')
@@ -137,6 +138,21 @@ def create_rule():
         action=action,
     )
 
+    # Audit: rule creation via rules API
+    AuditService.log(
+        actor=created_by,
+        action='create_rule',
+        resource_type='rule',
+        resource_id=rule.id,
+        detail={
+            'ip_address': ip_address,
+            'direction': direction,
+            'fw_action': action,
+            'node_id': node_id,
+        },
+        ip_address=request.remote_addr,
+    )
+
     return jsonify(rule.to_dict()), 201
 
 
@@ -164,6 +180,16 @@ def delete_rule(rule_id):
 
     if not removed:
         return jsonify({'error': 'Failed to remove rule.'}), 500
+
+    # Audit: rule deletion via rules API
+    AuditService.log(
+        actor=created_by,
+        action='delete_rule',
+        resource_type='rule',
+        resource_id=rule_id,
+        detail={'ip_address': rule.ip_address},
+        ip_address=request.remote_addr,
+    )
 
     return jsonify({
         'status': 'removed',

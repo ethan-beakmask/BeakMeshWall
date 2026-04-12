@@ -23,6 +23,9 @@ func NewFirewallModule(drv driver.Driver, logger *slog.Logger) *FirewallModule {
 // Name returns "firewall", matching the Task.Module field for firewall tasks.
 func (m *FirewallModule) Name() string { return "firewall" }
 
+// Driver returns the underlying driver.Driver for direct access (e.g., counter collection).
+func (m *FirewallModule) Driver() driver.Driver { return m.driver }
+
 // HandleTask dispatches a firewall task to the underlying driver.
 func (m *FirewallModule) HandleTask(task Task) TaskResult {
 	m.logger.Info("executing firewall task",

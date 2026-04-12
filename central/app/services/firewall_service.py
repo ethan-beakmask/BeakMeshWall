@@ -4,10 +4,21 @@ Firewall service: business logic for managing firewall rules and related tasks.
 
 from datetime import datetime, timezone, timedelta
 
+from flask import request as flask_request
+
 from ..extensions import db
 from ..models.firewall_rule import FirewallRule
 from ..models.node import Node
 from .task_service import TaskService
+from .audit_service import AuditService
+
+
+def _get_request_ip():
+    """Safely retrieve the remote IP from the current Flask request context."""
+    try:
+        return flask_request.remote_addr
+    except RuntimeError:
+        return None
 
 
 class FirewallService:
@@ -73,6 +84,22 @@ class FirewallService:
             created_by=created_by,
         )
 
+        # Audit: rule creation
+        AuditService.log(
+            actor=created_by or 'system',
+            action='create_rule',
+            resource_type='rule',
+            resource_id=rule.id,
+            detail={
+                'ip_address': ip_address,
+                'source': source,
+                'direction': direction,
+                'fw_action': action,
+                'node_id': node_id,
+            },
+            ip_address=_get_request_ip(),
+        )
+
         return rule
 
     @staticmethod
@@ -120,6 +147,19 @@ class FirewallService:
                 params=task_params,
                 target_node_id=rule.node_id,
                 created_by=created_by,
+            )
+
+            # Audit: rule deletion
+            AuditService.log(
+                actor=created_by or 'system',
+                action='delete_rule',
+                resource_type='rule',
+                resource_id=rule.id,
+                detail={
+                    'ip_address': rule.ip_address,
+                    'node_id': rule.node_id,
+                },
+                ip_address=_get_request_ip(),
             )
 
         if removed:
