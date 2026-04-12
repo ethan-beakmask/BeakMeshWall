@@ -33,6 +33,15 @@ class BaseConfig:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
 
+    # OIDC Configuration (optional -- leave unset to use Local Auth only)
+    OIDC_ENABLED = os.environ.get('BMW_OIDC_ENABLED', 'false').lower() == 'true'
+    OIDC_PROVIDER_NAME = os.environ.get('BMW_OIDC_PROVIDER_NAME', 'SSO')
+    OIDC_CLIENT_ID = os.environ.get('BMW_OIDC_CLIENT_ID', '')
+    OIDC_CLIENT_SECRET = os.environ.get('BMW_OIDC_CLIENT_SECRET', '')
+    OIDC_DISCOVERY_URL = os.environ.get('BMW_OIDC_DISCOVERY_URL', '')
+    # e.g. https://accounts.google.com/.well-known/openid-configuration
+    OIDC_SCOPES = os.environ.get('BMW_OIDC_SCOPES', 'openid email profile')
+
     # Agent poll interval in seconds (returned to agents)
     AGENT_POLL_INTERVAL = int(os.environ.get('BMW_POLL_INTERVAL', '30'))
 

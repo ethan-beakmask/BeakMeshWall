@@ -15,7 +15,7 @@ import (
 
 	"github.com/anthropics/BeakMeshWall/agent/internal/client"
 	"github.com/anthropics/BeakMeshWall/agent/internal/config"
-	"github.com/anthropics/BeakMeshWall/agent/internal/driver/nftables"
+	"github.com/anthropics/BeakMeshWall/agent/internal/driver/factory"
 	"github.com/anthropics/BeakMeshWall/agent/internal/module"
 )
 
@@ -79,6 +79,10 @@ func printUsage() {
 註冊參數:
   --token         一次性註冊令牌（從 Central 管理介面取得）
   --central-url   Central Server URL (例: https://192.168.0.16:5000)
+
+組態檔選項 (agent 區段):
+  driver      防火牆驅動程式 (auto|nftables|iptables|pf，預設: auto)
+              auto 會依優先順序自動偵測: nftables > iptables > pf
 `, version)
 }
 
@@ -148,19 +152,29 @@ func cmdRun(args []string) error {
 
 	logger := setupLogger(cfg)
 
-	// Initialize the firewall driver
-	drv := nftables.New(logger)
-	if err := drv.Init(); err != nil {
-		// Log warning but continue -- nftables may not be available in all environments
-		logger.Warn("nftables driver init failed (continuing without firewall control)",
+	// Initialize the firewall driver (auto-detect or use config value)
+	drv, err := factory.New(cfg.Agent.Driver, logger)
+	if err != nil {
+		logger.Warn("driver creation failed (continuing without firewall control)",
 			"error", err,
+			"requested_driver", cfg.Agent.Driver,
 		)
 	}
-	defer drv.Close()
+	if drv != nil {
+		if initErr := drv.Init(); initErr != nil {
+			logger.Warn("driver init failed (continuing without firewall control)",
+				"error", initErr,
+				"driver", drv.Name(),
+			)
+		}
+		defer drv.Close()
+	}
 
-	// Build the module registry and register the firewall module
+	// Build the module registry and register the firewall module (only if driver is available)
 	registry := module.NewRegistry()
-	registry.Register(module.NewFirewallModule(drv, logger))
+	if drv != nil {
+		registry.Register(module.NewFirewallModule(drv, logger))
+	}
 
 	// Create HTTP client
 	httpClient, err := client.NewClient(cfg, logger)
@@ -181,12 +195,17 @@ func cmdRun(args []string) error {
 		cancel()
 	}()
 
+	driverName := "none"
+	if drv != nil {
+		driverName = drv.Name()
+	}
+
 	logger.Info("agent starting",
 		"version", version,
 		"agent_id", cfg.Agent.ID,
 		"central_url", cfg.Central.URL,
 		"poll_interval", cfg.Agent.PollInterval,
-		"driver", drv.Name(),
+		"driver", driverName,
 	)
 
 	// Start the poll loop (blocks until context is cancelled)

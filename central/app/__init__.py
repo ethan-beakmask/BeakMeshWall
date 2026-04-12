@@ -6,6 +6,7 @@ from flask import Flask, redirect, url_for
 
 from .config import config_map
 from .extensions import db, migrate, login_manager, csrf
+from .auth.oidc import init_oidc
 
 
 def create_app(config_name=None):
@@ -29,6 +30,9 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     login_manager.init_app(app)
     csrf.init_app(app)
+
+    # Initialize OIDC (no-op if not configured)
+    init_oidc(app)
 
     # Register blueprints
     from .auth import auth_bp

@@ -28,6 +28,7 @@ type AgentConfig struct {
 	ID           string `yaml:"id"`
 	Secret       string `yaml:"secret"`
 	PollInterval int    `yaml:"poll_interval"`
+	Driver       string `yaml:"driver"` // "auto", "nftables", "iptables", "pf" (default: "auto")
 }
 
 // TLSConfig holds optional mTLS settings.
@@ -61,6 +62,9 @@ func LoadConfig(path string) (*Config, error) {
 	// Apply defaults
 	if cfg.Agent.PollInterval <= 0 {
 		cfg.Agent.PollInterval = 30
+	}
+	if cfg.Agent.Driver == "" {
+		cfg.Agent.Driver = "auto"
 	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"

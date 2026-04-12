@@ -30,8 +30,8 @@
 - **P0**: Repo 骨架、文件 (done)
 - **P1**: Central API + Local Auth + Agent 註冊/心跳 + mTLS (done)
 - **P2**: nftables Driver + 規則 CRUD + Threat Feed API (done)
-- **P3**: Counters 回報 + External Table 觀察 + Audit Log (current)
-- **P4**: iptables/pf Driver + OIDC 可選對接
+- **P3**: Counters 回報 + External Table 觀察 + Audit Log (done)
+- **P4**: iptables/pf Driver + OIDC 可選對接 (done)
 
 ## 開發環境
 - Central: 192.168.0.16
