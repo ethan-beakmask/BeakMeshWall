@@ -1,50 +1,58 @@
-// Package driver defines the interface for firewall backends.
 package driver
-
-// Driver defines the interface for firewall backends.
-// Each implementation (nftables, iptables, pf) must satisfy this interface.
-type Driver interface {
-	// Name returns the driver name (e.g., "nftables", "iptables").
-	Name() string
-
-	// Init initializes the driver, creating the managed table if needed.
-	Init() error
-
-	// Close cleans up driver resources.
-	Close() error
-
-	// BlockIP adds a block rule for the given IP address or CIDR block.
-	BlockIP(ip string, comment string) error
-
-	// UnblockIP removes the block rule for the given IP address or CIDR block.
-	UnblockIP(ip string) error
-
-	// ListRules returns all rules in the managed table.
-	ListRules() ([]Rule, error)
-
-	// ListTables returns all nftables tables (managed + external).
-	ListTables() ([]Table, error)
-}
 
 // Rule represents a single firewall rule.
 type Rule struct {
-	ID      string  `json:"id"`
-	Chain   string  `json:"chain"`
-	Expr    string  `json:"expr"`
-	Comment string  `json:"comment"`
-	Counter Counter `json:"counter"`
+	Chain    string `json:"chain"`
+	Handle   int    `json:"handle,omitempty"`
+	Expr     string `json:"expr"`     // Human-readable expression
+	Packets  int64  `json:"packets"`
+	Bytes    int64  `json:"bytes"`
+	Comment  string `json:"comment,omitempty"`
 }
 
-// Counter holds packet/byte counters for a rule.
-type Counter struct {
-	Packets uint64 `json:"packets"`
-	Bytes   uint64 `json:"bytes"`
-}
-
-// Table represents an nftables table.
+// Table represents a firewall table.
 type Table struct {
+	Family string `json:"family"` // inet, ip, ip6
+	Name   string `json:"name"`
+	Chains []Chain `json:"chains"`
+}
+
+// Chain represents a chain within a table.
+type Chain struct {
 	Name     string `json:"name"`
-	Family   string `json:"family"`
-	Managed  bool   `json:"managed"`  // true if managed by BeakMeshWall
-	External string `json:"external"` // "docker", "lxc", "" if managed
+	Type     string `json:"type,omitempty"`     // filter, nat, route
+	Hook     string `json:"hook,omitempty"`     // input, output, forward
+	Priority int    `json:"priority,omitempty"`
+	Policy   string `json:"policy,omitempty"`   // accept, drop
+	Rules    []Rule `json:"rules"`
+}
+
+// FirewallState is the full snapshot of firewall state.
+type FirewallState struct {
+	ManagedTable    *Table  `json:"managed_table,omitempty"`
+	ExternalTables  []Table `json:"external_tables,omitempty"`
+}
+
+// Driver is the interface each OS firewall driver must implement.
+type Driver interface {
+	// Init sets up the managed table/chain if not exists.
+	Init() error
+
+	// GetState returns the current firewall state (managed + external).
+	GetState() (*FirewallState, error)
+
+	// AddRule adds a rule to the managed table.
+	AddRule(chain, rule, comment string) error
+
+	// DeleteRule removes a rule from the managed table by handle.
+	DeleteRule(chain string, handle int) error
+
+	// BlockIP adds a drop rule for the given IP/CIDR.
+	BlockIP(ip, comment string) error
+
+	// UnblockIP removes the drop rule for the given IP/CIDR.
+	UnblockIP(ip string) error
+
+	// Flush removes all rules from the managed table.
+	Flush() error
 }

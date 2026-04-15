@@ -11,6 +11,7 @@ venv/
 env/
 
 # Go
+agent/bmw-agent
 agent/beakmeshwall-agent
 *.exe
 *.dll
@@ -44,3 +45,7 @@ Thumbs.db
 
 # Config (local overrides)
 config.local.ini
+agent/test-config.yaml
+
+# Archive (old unverified code)
+_archive/

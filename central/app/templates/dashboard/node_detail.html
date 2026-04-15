@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}{{ node.hostname }} - BeakMeshWall{% endblock %}
+{% block content %}
+<div x-data="nodeManager()" x-init="init()">
+  <div class="d-flex justify-content-between align-items-center">
+    <h4>{{ node.hostname }}
+      {% if node.status == 'online' %}
+        <span class="badge bg-success">Online</span>
+      {% else %}
+        <span class="badge bg-danger">{{ node.status }}</span>
+      {% endif %}
+    </h4>
+    <a href="{{ url_for('dashboard.nodes') }}" class="btn btn-sm btn-outline-secondary">Back to Nodes</a>
+  </div>
+
+  <div class="row mt-3">
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-header"><strong>Node Info</strong></div>
+        <div class="card-body">
+          <table class="table table-sm mb-0">
+            <tr><td>IP</td><td>{{ node.ip_address }}</td></tr>
+            <tr><td>OS</td><td>{{ node.os_type }}</td></tr>
+            <tr><td>Driver</td><td>{{ node.fw_driver }}</td></tr>
+            <tr><td>Agent Ver.</td><td>{{ node.agent_version or '-' }}</td></tr>
+            <tr><td>Last Seen</td><td>{{ node.last_seen_at.strftime('%Y-%m-%d %H:%M:%S') if node.last_seen_at else '-' }}</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header"><strong>Quick Actions</strong></div>
+        <div class="card-body">
+          <div class="row g-2">
+            <div class="col-md-5">
+              <input type="text" class="form-control form-control-sm" x-model="blockIP"
+                     placeholder="IP or CIDR (e.g. 10.0.0.1 or 10.0.0.0/24)" :disabled="busy">
+            </div>
+            <div class="col-md-4">
+              <input type="text" class="form-control form-control-sm" x-model="blockComment"
+                     placeholder="Comment (optional)" :disabled="busy">
+            </div>
+            <div class="col-md-3">
+              <button class="btn btn-sm btn-danger w-100" @click="doBlock()"
+                      :disabled="!blockIP.trim() || busy">
+                <span x-show="!busy">Block IP</span>
+                <span x-show="busy" class="spinner-border spinner-border-sm"></span>
+              </button>
+            </div>
+          </div>
+          <div class="row g-2 mt-1">
+            <div class="col-md-5">
+              <input type="text" class="form-control form-control-sm" x-model="unblockIP"
+                     placeholder="IP or CIDR to unblock" :disabled="busy">
+            </div>
+            <div class="col-md-3 offset-md-4">
+              <button class="btn btn-sm btn-success w-100" @click="doUnblock()"
+                      :disabled="!unblockIP.trim() || busy">
+                <span x-show="!busy">Unblock IP</span>
+                <span x-show="busy" class="spinner-border spinner-border-sm"></span>
+              </button>
+            </div>
+          </div>
+          <div class="mt-2" x-show="actionMsg" x-text="actionMsg"
+               :class="actionOk ? 'text-success' : 'text-danger'" style="font-size: 0.85rem;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Managed Table -->
+  <div class="card mt-3">
+    {% if fw_state and fw_state.managed_table %}
+    <div class="card-header"><strong>Managed Table: {{ fw_state.managed_table.family }} {{ fw_state.managed_table.name }}</strong></div>
+    <div class="card-body p-0">
+      {% for chain in fw_state.managed_table.chains %}
+      <div class="p-2 border-bottom bg-light">
+        <strong>Chain: {{ chain.name }}</strong>
+        {% if chain.type %} ({{ chain.type }}/{{ chain.hook }}, priority {{ chain.priority }}, policy {{ chain.policy }}){% endif %}
+      </div>
+      {% if chain.rules %}
+      <table class="table table-sm table-bordered mb-0">
+        <thead>
+          <tr><th style="width:60px">Handle</th><th>Expression</th><th style="width:100px">Comment</th><th style="width:80px">Action</th></tr>
+        </thead>
+        <tbody>
+          {% for rule in chain.rules %}
+          <tr>
+            <td>{{ rule.handle }}</td>
+            <td><code style="font-size:0.8rem">{{ rule.expr }}</code></td>
+            <td>{{ rule.comment or '' }}</td>
+            <td>
+              <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                      @click="doDeleteRule('{{ chain.name }}', {{ rule.handle }}, $el)"
+                      :disabled="busy">Del</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="p-2 text-muted">No rules</div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="card-header"><strong>Managed Table</strong></div>
+    <div class="card-body text-muted">No firewall state reported yet.</div>
+    {% endif %}
+  </div>
+
+  <!-- External Tables -->
+  {% if fw_state and fw_state.external_tables %}
+  <div class="card mt-3">
+    <div class="card-header"><strong>External Tables (read-only)</strong></div>
+    <div class="card-body p-0">
+      {% for tbl in fw_state.external_tables %}
+      <div x-data="{ expanded: false }">
+        <div class="p-2 border-bottom d-flex align-items-center" style="cursor:pointer" @click="expanded = !expanded">
+          <span x-text="expanded ? '&#9660;' : '&#9654;'" class="me-2" style="font-size:0.7rem"></span>
+          <strong>{{ tbl.family }} {{ tbl.name }}</strong>
+          <span class="text-muted ms-2">({{ tbl.chains|length }} chains)</span>
+        </div>
+        <div x-show="expanded" x-transition style="background: #fafafa;">
+          {% for chain in tbl.chains %}
+          <div class="ps-4 py-1 border-bottom" style="font-size: 0.85rem;">
+            <strong>{{ chain.name }}</strong>
+            {% if chain.type %}<span class="text-muted"> ({{ chain.type }}/{{ chain.hook }}, policy {{ chain.policy }})</span>{% endif %}
+            {% if chain.rules %}
+            <table class="table table-sm mb-0 mt-1" style="font-size: 0.8rem;">
+              <thead><tr><th style="width:50px">Handle</th><th>Expression</th><th style="width:80px">Comment</th></tr></thead>
+              <tbody>
+                {% for rule in chain.rules %}
+                <tr>
+                  <td>{{ rule.handle }}</td>
+                  <td><code>{{ rule.expr }}</code></td>
+                  <td>{{ rule.comment or '' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <div class="text-muted">(no rules)</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Recent Tasks -->
+  <div class="card mt-3">
+    <div class="card-header"><strong>Recent Tasks</strong></div>
+    <div class="card-body p-0">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>ID</th><th>Action</th><th>Payload</th><th>Status</th><th>Created</th><th>By</th></tr></thead>
+        <tbody>
+          {% for t in tasks %}
+          <tr>
+            <td>{{ t.id }}</td>
+            <td>{{ t.action }}</td>
+            <td><code style="font-size:0.8rem">{{ t.payload }}</code></td>
+            <td>
+              {% if t.status == 'success' %}<span class="badge bg-success">{{ t.status }}</span>
+              {% elif t.status == 'failed' %}<span class="badge bg-danger">{{ t.status }}</span>
+              {% elif t.status == 'sent' %}<span class="badge bg-info">{{ t.status }}</span>
+              {% else %}<span class="badge bg-warning text-dark">{{ t.status }}</span>{% endif %}
+            </td>
+            <td>{{ t.created_at.strftime('%H:%M:%S') if t.created_at else '-' }}</td>
+            <td>{{ t.created_by or '-' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function nodeManager() {
+  return {
+    blockIP: '', blockComment: '', unblockIP: '',
+    actionMsg: '', actionOk: false, busy: false,
+    init() {},
+
+    async doBlock() {
+      this.busy = true;
+      await this.postAndWait('/api/v1/rules/block', {
+        node_id: {{ node.id }}, ip: this.blockIP, comment: this.blockComment
+      });
+      this.blockIP = ''; this.blockComment = '';
+    },
+
+    async doUnblock() {
+      this.busy = true;
+      await this.postAndWait('/api/v1/rules/unblock', {
+        node_id: {{ node.id }}, ip: this.unblockIP
+      });
+      this.unblockIP = '';
+    },
+
+    async doDeleteRule(chain, handle, btnEl) {
+      this.busy = true;
+      btnEl.disabled = true;
+      btnEl.textContent = '...';
+      await this.postAndWait('/api/v1/rules/delete', {
+        node_id: {{ node.id }}, chain: chain, handle: handle
+      });
+    },
+
+    async postAndWait(url, body) {
+      this.actionMsg = '';
+      try {
+        const r = await fetch(url, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          this.actionMsg = 'Error: ' + (d.error || 'unknown');
+          this.actionOk = false;
+          this.busy = false;
+          return;
+        }
+
+        this.actionMsg = 'Task #' + d.task_id + ' created, waiting for agent...';
+        this.actionOk = true;
+
+        // Poll task status until completed
+        const taskId = d.task_id;
+        const maxWait = 60;  // seconds
+        const interval = 2;  // seconds
+        let elapsed = 0;
+
+        while (elapsed < maxWait) {
+          await this.sleep(interval * 1000);
+          elapsed += interval;
+
+          const sr = await fetch('/api/v1/task/' + taskId);
+          if (!sr.ok) continue;
+          const sd = await sr.json();
+
+          if (sd.status === 'success') {
+            this.actionMsg = 'Task #' + taskId + ' completed successfully.';
+            this.actionOk = true;
+            // Reload page to show updated firewall state
+            await this.sleep(500);
+            window.location.reload();
+            return;
+          }
+          if (sd.status === 'failed') {
+            this.actionMsg = 'Task #' + taskId + ' failed: ' + (sd.result || 'unknown error');
+            this.actionOk = false;
+            this.busy = false;
+            return;
+          }
+
+          this.actionMsg = 'Task #' + taskId + ' waiting... (' + elapsed + 's)';
+        }
+
+        this.actionMsg = 'Task #' + taskId + ' still pending after ' + maxWait + 's. Refresh manually.';
+        this.actionOk = false;
+
+      } catch(e) {
+        this.actionMsg = 'Request failed: ' + e.message;
+        this.actionOk = false;
+      }
+      this.busy = false;
+    },
+
+    sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+  };
+}
+</script>
+{% endblock %}

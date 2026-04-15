@@ -1,202 +1,165 @@
-"""
-Firewall rules CRUD API endpoints.
-
-All routes require session auth (Flask-Login) or API key (X-API-Key).
-"""
-
-import ipaddress
-
-from flask import request, jsonify, g
-
-from . import api_bp
-from .decorators import require_auth
-from ..services.firewall_service import FirewallService
-from ..services.audit_service import AuditService
+import json
+from flask import request, jsonify
+from flask_login import login_required, current_user
+from app.api import api_bp
+from app.extensions import db
+from app.models.node import Node
+from app.models.task import Task
 
 
-VALID_RULE_TYPES = ('block', 'allow', 'custom')
-VALID_DIRECTIONS = ('inbound', 'outbound', 'both')
-VALID_ACTIONS = ('drop', 'accept', 'reject')
-VALID_STATUS_FILTERS = ('active', 'expired', 'removed')
-
-
-def _validate_ip(ip_str):
-    """Return True if ip_str is a valid IPv4/IPv6 address or CIDR block."""
-    try:
-        ipaddress.ip_address(ip_str)
-        return True
-    except (ValueError, TypeError):
-        pass
-    try:
-        ipaddress.ip_network(ip_str, strict=False)
-        return True
-    except (ValueError, TypeError):
-        return False
-
-
-@api_bp.route('/rules', methods=['GET'])
-@require_auth
-def list_rules():
-    """List firewall rules with optional filters.
-
-    Query params:
-        node_id  -- filter by node UUID
-        status   -- filter by status (active, expired, removed)
-        type     -- filter by rule type (block, allow, custom)
-    """
-    node_id = request.args.get('node_id')
-    status = request.args.get('status')
-    rule_type = request.args.get('type')
-
-    if status and status not in VALID_STATUS_FILTERS:
-        return jsonify({'error': f'Invalid status filter. Must be one of: {", ".join(VALID_STATUS_FILTERS)}'}), 400
-
-    if rule_type and rule_type not in VALID_RULE_TYPES:
-        return jsonify({'error': f'Invalid type filter. Must be one of: {", ".join(VALID_RULE_TYPES)}'}), 400
-
-    # Default to active if no status filter specified
-    if status is None:
-        rules = FirewallService.get_active_rules(node_id=node_id, rule_type=rule_type)
-    else:
-        from ..models.firewall_rule import FirewallRule
-        query = FirewallRule.query.filter_by(status=status)
-        if node_id:
-            query = query.filter_by(node_id=node_id)
-        if rule_type:
-            query = query.filter_by(rule_type=rule_type)
-        rules = query.order_by(FirewallRule.created_at.desc()).all()
-
-    return jsonify({
-        'rules': [r.to_dict() for r in rules],
-        'count': len(rules),
-    })
-
-
-@api_bp.route('/rules/<int:rule_id>', methods=['GET'])
-@require_auth
-def get_rule(rule_id):
-    """Get a single firewall rule by ID."""
-    rule = FirewallService.get_rule_by_id(rule_id)
-    if rule is None:
-        return jsonify({'error': 'Rule not found.'}), 404
-
-    return jsonify(rule.to_dict())
-
-
-@api_bp.route('/rules', methods=['POST'])
-@require_auth
-def create_rule():
-    """Create a new firewall rule.
-
-    Expects JSON body:
-        {
-            "ip_address": "203.0.113.50",
-            "node_id": null,
-            "rule_type": "block",
-            "direction": "inbound",
-            "action": "drop",
-            "duration": 3600,
-            "comment": "manual block"
-        }
-    """
-    data = request.get_json(silent=True)
+@api_bp.route("/rules/block", methods=["POST"])
+@login_required
+def create_block_task():
+    """Create a block_ip task for a node."""
+    data = request.get_json()
     if not data:
-        return jsonify({'error': 'Request body must be valid JSON.'}), 400
+        return jsonify({"error": "invalid request"}), 400
 
-    ip_address = data.get('ip_address', '').strip()
-    if not ip_address:
-        return jsonify({'error': '"ip_address" is required.'}), 400
+    node_id = data.get("node_id")
+    ip = data.get("ip", "").strip()
+    comment = data.get("comment", "")
 
-    if not _validate_ip(ip_address):
-        return jsonify({'error': f'Invalid IP address or CIDR: {ip_address}'}), 400
+    if not node_id or not ip:
+        return jsonify({"error": "node_id and ip are required"}), 400
 
-    rule_type = data.get('rule_type', 'block')
-    if rule_type not in VALID_RULE_TYPES:
-        return jsonify({'error': f'Invalid rule_type. Must be one of: {", ".join(VALID_RULE_TYPES)}'}), 400
+    node = db.session.get(Node, node_id)
+    if not node:
+        return jsonify({"error": "node not found"}), 404
 
-    direction = data.get('direction', 'inbound')
-    if direction not in VALID_DIRECTIONS:
-        return jsonify({'error': f'Invalid direction. Must be one of: {", ".join(VALID_DIRECTIONS)}'}), 400
-
-    action = data.get('action', 'drop')
-    if action not in VALID_ACTIONS:
-        return jsonify({'error': f'Invalid action. Must be one of: {", ".join(VALID_ACTIONS)}'}), 400
-
-    node_id = data.get('node_id')
-    duration = data.get('duration')
-    comment = data.get('comment')
-
-    if duration is not None:
-        if not isinstance(duration, int) or duration <= 0:
-            return jsonify({'error': '"duration" must be a positive integer (seconds).'}), 400
-
-    created_by = g.auth_identity
-
-    rule = FirewallService.create_block_rule(
-        ip_address=ip_address,
-        node_id=node_id,
-        source='manual' if g.auth_type == 'session' else 'api',
-        duration=duration,
-        comment=comment,
-        created_by=created_by,
-        direction=direction,
-        action=action,
+    task = Task(
+        node_id=node.id,
+        action="block_ip",
+        payload=json.dumps({"ip": ip, "comment": comment}),
+        created_by=current_user.username,
     )
+    db.session.add(task)
+    db.session.commit()
 
-    # Audit: rule creation via rules API
-    AuditService.log(
-        actor=created_by,
-        action='create_rule',
-        resource_type='rule',
-        resource_id=rule.id,
-        detail={
-            'ip_address': ip_address,
-            'direction': direction,
-            'fw_action': action,
-            'node_id': node_id,
-        },
-        ip_address=request.remote_addr,
+    return jsonify({"task_id": task.id, "status": "pending"}), 201
+
+
+@api_bp.route("/rules/unblock", methods=["POST"])
+@login_required
+def create_unblock_task():
+    """Create an unblock_ip task for a node."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    node_id = data.get("node_id")
+    ip = data.get("ip", "").strip()
+
+    if not node_id or not ip:
+        return jsonify({"error": "node_id and ip are required"}), 400
+
+    node = db.session.get(Node, node_id)
+    if not node:
+        return jsonify({"error": "node not found"}), 404
+
+    task = Task(
+        node_id=node.id,
+        action="unblock_ip",
+        payload=json.dumps({"ip": ip}),
+        created_by=current_user.username,
     )
+    db.session.add(task)
+    db.session.commit()
 
-    return jsonify(rule.to_dict()), 201
+    return jsonify({"task_id": task.id, "status": "pending"}), 201
 
 
-@api_bp.route('/rules/<int:rule_id>', methods=['DELETE'])
-@require_auth
-def delete_rule(rule_id):
-    """Remove a firewall rule and create unblock task(s).
+@api_bp.route("/rules/add", methods=["POST"])
+@login_required
+def create_add_rule_task():
+    """Create an add_rule task for a node."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
 
-    This does not delete the record -- it sets status to 'removed'
-    and dispatches an unblock task to the relevant agent(s).
-    """
-    rule = FirewallService.get_rule_by_id(rule_id)
-    if rule is None:
-        return jsonify({'error': 'Rule not found.'}), 404
+    node_id = data.get("node_id")
+    chain = data.get("chain", "filter_input")
+    rule = data.get("rule", "").strip()
+    comment = data.get("comment", "")
 
-    if rule.status != 'active':
-        return jsonify({'error': f'Rule is already {rule.status}.'}), 400
+    if not node_id or not rule:
+        return jsonify({"error": "node_id and rule are required"}), 400
 
-    created_by = g.auth_identity
+    node = db.session.get(Node, node_id)
+    if not node:
+        return jsonify({"error": "node not found"}), 404
 
-    removed = FirewallService.remove_block_rule(
-        rule_id=rule_id,
-        created_by=created_by,
+    task = Task(
+        node_id=node.id,
+        action="add_rule",
+        payload=json.dumps({"chain": chain, "rule": rule, "comment": comment}),
+        created_by=current_user.username,
     )
+    db.session.add(task)
+    db.session.commit()
 
-    if not removed:
-        return jsonify({'error': 'Failed to remove rule.'}), 500
+    return jsonify({"task_id": task.id, "status": "pending"}), 201
 
-    # Audit: rule deletion via rules API
-    AuditService.log(
-        actor=created_by,
-        action='delete_rule',
-        resource_type='rule',
-        resource_id=rule_id,
-        detail={'ip_address': rule.ip_address},
-        ip_address=request.remote_addr,
+
+@api_bp.route("/rules/delete", methods=["POST"])
+@login_required
+def create_delete_rule_task():
+    """Create a delete_rule task for a node."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    node_id = data.get("node_id")
+    chain = data.get("chain", "filter_input")
+    handle = data.get("handle")
+
+    if not node_id or handle is None:
+        return jsonify({"error": "node_id and handle are required"}), 400
+
+    node = db.session.get(Node, node_id)
+    if not node:
+        return jsonify({"error": "node not found"}), 404
+
+    task = Task(
+        node_id=node.id,
+        action="delete_rule",
+        payload=json.dumps({"chain": chain, "handle": handle}),
+        created_by=current_user.username,
     )
+    db.session.add(task)
+    db.session.commit()
 
+    return jsonify({"task_id": task.id, "status": "pending"}), 201
+
+
+@api_bp.route("/tasks/<int:node_id>", methods=["GET"])
+@login_required
+def get_node_tasks(node_id):
+    """Get recent tasks for a node."""
+    tasks = Task.query.filter_by(node_id=node_id).order_by(
+        Task.created_at.desc()
+    ).limit(50).all()
+
+    return jsonify([{
+        "id": t.id,
+        "action": t.action,
+        "payload": json.loads(t.payload),
+        "status": t.status,
+        "result": t.result,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+        "created_by": t.created_by,
+    } for t in tasks])
+
+
+@api_bp.route("/task/<int:task_id>", methods=["GET"])
+@login_required
+def get_task_status(task_id):
+    """Get single task status (for polling)."""
+    task = db.session.get(Task, task_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
     return jsonify({
-        'status': 'removed',
-        'rule_id': rule_id,
+        "id": task.id,
+        "status": task.status,
+        "result": task.result,
     })

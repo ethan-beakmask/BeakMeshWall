@@ -1,20 +1,6 @@
-"""
-Database models for BeakMeshWall.
-"""
+from app.models.user import User
+from app.models.node import Node
+from app.models.api_key import ApiKey
+from app.models.task import Task
 
-from .user import User
-from .node import Node
-from .api_key import APIKey, RegistrationToken
-from .task import Task
-from .firewall_rule import FirewallRule
-from .audit_log import AuditLog
-
-__all__ = [
-    'User',
-    'Node',
-    'APIKey',
-    'RegistrationToken',
-    'Task',
-    'FirewallRule',
-    'AuditLog',
-]
+__all__ = ["User", "Node", "ApiKey", "Task"]

@@ -1,185 +1,136 @@
-// Package client implements the HTTP client for communicating with BeakMeshWall Central Server.
 package client
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"os"
-	"strings"
 	"time"
-
-	"github.com/anthropics/BeakMeshWall/agent/internal/config"
 )
 
-// Version is set at build time via -ldflags.
-var Version = "dev"
-
-const (
-	httpTimeout = 30 * time.Second
-)
-
-// Client handles HTTP communication with the Central Server.
+// Client communicates with the Central Server.
 type Client struct {
-	httpClient *http.Client
 	baseURL    string
-	agentID    string
-	secret     string
-	logger     *slog.Logger
+	token      string
+	httpClient *http.Client
 }
 
-// NewClient creates a Client configured from the given Config.
-// It sets up TLS (optional client certs, CA cert, skip_verify) and
-// authentication headers.
-func NewClient(cfg *config.Config, logger *slog.Logger) (*Client, error) {
-	tlsConfig, err := buildTLSConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build TLS config: %w", err)
-	}
-
-	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}
-
+func New(baseURL, token string) *Client {
 	return &Client{
+		baseURL: baseURL,
+		token:   token,
 		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   httpTimeout,
+			Timeout: 30 * time.Second,
 		},
-		baseURL: strings.TrimRight(cfg.Central.URL, "/"),
-		agentID: cfg.Agent.ID,
-		secret:  cfg.Agent.Secret,
-		logger:  logger,
-	}, nil
-}
-
-// SetCredentials updates the agent ID and bearer token after registration.
-func (c *Client) SetCredentials(agentID, secret string) {
-	c.agentID = agentID
-	c.secret = secret
-}
-
-// doGet performs an authenticated GET request to the given API path.
-func (c *Client) doGet(path string) (*http.Response, error) {
-	url := c.baseURL + path
-	c.logger.Debug("GET request", "url", url)
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create GET request: %w", err)
-	}
-
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("execute GET request: %w", err)
-	}
-
-	return resp, nil
-}
-
-// doPost performs an authenticated POST request with a JSON body.
-func (c *Client) doPost(path string, body interface{}) (*http.Response, error) {
-	url := c.baseURL + path
-	c.logger.Debug("POST request", "url", url)
-
-	jsonData, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("create POST request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	c.setHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("execute POST request: %w", err)
-	}
-
-	return resp, nil
-}
-
-// setHeaders applies common headers to a request.
-func (c *Client) setHeaders(req *http.Request) {
-	req.Header.Set("User-Agent", fmt.Sprintf("BeakMeshWall-Agent/%s", Version))
-
-	if c.secret != "" {
-		req.Header.Set("Authorization", "Bearer "+c.secret)
-	}
-	if c.agentID != "" {
-		req.Header.Set("X-Agent-ID", c.agentID)
 	}
 }
 
-// decodeResponse reads and decodes a JSON response body into the given target.
-// It also closes the response body.
-func decodeResponse(resp *http.Response, target interface{}) error {
+func (c *Client) SetToken(token string) {
+	c.token = token
+}
+
+// RegisterRequest is sent when agent first connects.
+type RegisterRequest struct {
+	Hostname     string `json:"hostname"`
+	OSType       string `json:"os_type"`
+	FWDriver     string `json:"fw_driver"`
+	AgentVersion string `json:"agent_version"`
+}
+
+// RegisterResponse is returned after successful registration.
+type RegisterResponse struct {
+	NodeID       int    `json:"node_id"`
+	Token        string `json:"token"`
+	PollInterval int    `json:"poll_interval"`
+}
+
+// PollResponse contains tasks from Central.
+type PollResponse struct {
+	NodeID int          `json:"node_id"`
+	Tasks  []TaskItem   `json:"tasks"`
+}
+
+type TaskItem struct {
+	ID      int             `json:"id"`
+	Action  string          `json:"action"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// Register registers this agent with Central.
+func (c *Client) Register(req RegisterRequest) (*RegisterResponse, error) {
+	body, _ := json.Marshal(req)
+	resp, err := c.doRequest("POST", "/api/v1/agent/register", body)
+	if err != nil {
+		return nil, err
+	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != 201 {
+		msg, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("register failed (HTTP %d): %s", resp.StatusCode, msg)
+	}
+
+	var result RegisterResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode register response: %w", err)
+	}
+	return &result, nil
+}
+
+// Poll asks Central for pending tasks.
+func (c *Client) Poll() (*PollResponse, error) {
+	resp, err := c.doRequest("GET", "/api/v1/agent/poll", nil)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		msg, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("poll failed (HTTP %d): %s", resp.StatusCode, msg)
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	var result PollResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode poll response: %w", err)
 	}
+	return &result, nil
+}
 
-	if target != nil {
-		if err := json.Unmarshal(body, target); err != nil {
-			return fmt.Errorf("decode response JSON: %w", err)
-		}
+// Report sends firewall state and task results to Central.
+func (c *Client) Report(data map[string]interface{}) error {
+	body, _ := json.Marshal(data)
+	resp, err := c.doRequest("POST", "/api/v1/agent/report", body)
+	if err != nil {
+		return err
 	}
+	defer resp.Body.Close()
 
+	if resp.StatusCode != 200 {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("report failed (HTTP %d): %s", resp.StatusCode, msg)
+	}
 	return nil
 }
 
-// buildTLSConfig constructs a tls.Config from the agent configuration.
-func buildTLSConfig(cfg *config.Config) (*tls.Config, error) {
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
+func (c *Client) doRequest(method, path string, body []byte) (*http.Response, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
 	}
 
-	// Skip server certificate verification (development only)
-	if cfg.TLS.SkipVerify {
-		tlsConfig.InsecureSkipVerify = true
+	req, err := http.NewRequest(method, c.baseURL+path, bodyReader)
+	if err != nil {
+		return nil, err
 	}
 
-	// Load custom CA certificate
-	if cfg.TLS.CACert != "" {
-		caCert, err := os.ReadFile(cfg.TLS.CACert)
-		if err != nil {
-			return nil, fmt.Errorf("read CA cert %q: %w", cfg.TLS.CACert, err)
-		}
-
-		caCertPool := x509.NewCertPool()
-		if !caCertPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA cert %q", cfg.TLS.CACert)
-		}
-
-		tlsConfig.RootCAs = caCertPool
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
-	// Load client certificate for mTLS
-	if cfg.TLS.ClientCert != "" && cfg.TLS.ClientKey != "" {
-		cert, err := tls.LoadX509KeyPair(cfg.TLS.ClientCert, cfg.TLS.ClientKey)
-		if err != nil {
-			return nil, fmt.Errorf("load client cert/key: %w", err)
-		}
-
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
-
-	return tlsConfig, nil
+	return c.httpClient.Do(req)
 }

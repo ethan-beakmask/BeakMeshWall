@@ -1,11 +1,5 @@
-"""
-Authentication blueprint for web UI login/logout.
-"""
-
 from flask import Blueprint
 
-auth_bp = Blueprint(
-    'auth', __name__, template_folder='../templates/auth'
-)
+auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
-from . import routes  # noqa: E402, F401 -- register routes
+from app.auth import routes  # noqa: E402, F401

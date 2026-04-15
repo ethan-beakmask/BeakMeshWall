@@ -1,4 +1,4 @@
-module github.com/anthropics/BeakMeshWall/agent
+module github.com/anthropics/beakmeshwall-agent
 
 go 1.22
 
