@@ -15,6 +15,7 @@
       <th>Status</th>
       <th>Registered</th>
       <th>Last Seen</th>
+      <th>Actions</th>
     </tr>
   </thead>
   <tbody>
@@ -37,6 +38,7 @@
       </td>
       <td>{{ node.registered_at.strftime('%Y-%m-%d %H:%M') if node.registered_at else '-' }}</td>
       <td>{{ node.last_seen_at.strftime('%Y-%m-%d %H:%M:%S') if node.last_seen_at else '-' }}</td>
+      <td><a href="{{ url_for('dashboard.topology', node_id=node.id) }}" class="btn btn-sm btn-outline-primary">Topology</a></td>
     </tr>
     {% endfor %}
   </tbody>

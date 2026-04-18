@@ -8,9 +8,11 @@ import (
 )
 
 type Config struct {
-	Central  CentralConfig `yaml:"central"`
-	Agent    AgentConfig   `yaml:"agent"`
-	Firewall FWConfig      `yaml:"firewall"`
+	Central  CentralConfig  `yaml:"central"`
+	Agent    AgentConfig    `yaml:"agent"`
+	Firewall FWConfig       `yaml:"firewall"`
+	Modules  ModulesConfig  `yaml:"modules"`
+	Nginx    NginxConfig    `yaml:"nginx"`
 }
 
 type CentralConfig struct {
@@ -28,6 +30,16 @@ type FWConfig struct {
 	Table  string `yaml:"table"`  // managed table name, default: inet beakmeshwall
 }
 
+type ModulesConfig struct {
+	Firewall bool `yaml:"firewall"`
+	Nginx    bool `yaml:"nginx"`
+	Service  bool `yaml:"service"`
+}
+
+type NginxConfig struct {
+	ConfigPath string `yaml:"config_path"` // default: /etc/nginx/sites-enabled
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -41,6 +53,14 @@ func Load(path string) (*Config, error) {
 		Firewall: FWConfig{
 			Driver: "nftables",
 			Table:  "inet beakmeshwall",
+		},
+		Modules: ModulesConfig{
+			Firewall: true,
+			Nginx:    true,
+			Service:  true,
+		},
+		Nginx: NginxConfig{
+			ConfigPath: "/etc/nginx/sites-enabled",
 		},
 	}
 

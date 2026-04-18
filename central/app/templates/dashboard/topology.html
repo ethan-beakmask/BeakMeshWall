@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}Topology - {{ node.hostname }} - BeakMeshWall{% endblock %}
+{% block content %}
+<div x-data="topologyApp()" x-init="loadTopology()">
+  <div class="d-flex align-items-center mb-3">
+    <h4 class="mb-0">Request Path Topology</h4>
+    <span class="badge bg-secondary ms-2">{{ node.hostname }}</span>
+    <span class="text-muted ms-2">({{ node.ip_address }})</span>
+    <button class="btn btn-sm btn-outline-secondary ms-auto" @click="loadTopology()">Refresh</button>
+  </div>
+
+  <!-- Warnings -->
+  <template x-if="warnings.length > 0">
+    <div>
+      <template x-for="w in warnings" :key="w.type + (w.detail || '')">
+        <div class="alert alert-warning py-2 mb-2">
+          <template x-if="w.type === 'non_compliant'">
+            <span>
+              <strong>Non-compliant nginx configs:</strong>
+              <span x-text="w.files ? w.files.join(', ') : ''"></span>
+              -- These files lack bmw: tags and are not managed.
+            </span>
+          </template>
+          <template x-if="w.type === 'no_data'">
+            <span x-text="w.detail"></span>
+          </template>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Loading -->
+  <template x-if="loading">
+    <div class="text-muted">Loading topology data...</div>
+  </template>
+
+  <!-- Topology Table -->
+  <template x-if="!loading && paths.length > 0">
+    <table class="table table-sm table-bordered table-hover mt-2">
+      <thead class="table-dark">
+        <tr>
+          <th style="width: 70px;">Status</th>
+          <th style="width: 90px; cursor:pointer;" @click="sortBy('external_port')">
+            Ext. Port
+            <span x-text="sortCol === 'external_port' ? (sortAsc ? '\u25B2' : '\u25BC') : '\u25B2'" class="float-end" style="opacity: 0.5;"></span>
+          </th>
+          <th>Firewall</th>
+          <th>Nginx</th>
+          <th>Server Name</th>
+          <th>Backend</th>
+          <th>Process</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="(p, idx) in sortedPaths" :key="p.external_port + '-' + idx">
+          <tr>
+            <td class="text-center">
+              <span class="badge" :class="statusBadge(p.status)" x-text="statusLabel(p.status)"></span>
+            </td>
+            <td>
+              <a href="#" @click.prevent="toggleDetail(idx)" x-text="p.external_port" class="fw-bold"></a>
+            </td>
+            <td x-text="p.firewall ? p.firewall.action.toUpperCase() : '--'"></td>
+            <td>
+              <template x-if="p.nginx">
+                <span x-text="p.nginx.service_name"></span>
+              </template>
+              <template x-if="!p.nginx">
+                <span class="text-muted">--</span>
+              </template>
+            </td>
+            <td x-text="p.nginx ? p.nginx.server_name : '--'"></td>
+            <td>
+              <template x-if="p.service">
+                <span x-text="p.service.bind + ':' + p.service.port"></span>
+              </template>
+              <template x-if="!p.service && p.nginx">
+                <span x-text="p.nginx.backend" class="text-muted"></span>
+              </template>
+              <template x-if="!p.service && !p.nginx">
+                <span class="text-muted">--</span>
+              </template>
+            </td>
+            <td x-text="p.service ? p.service.process : '--'"></td>
+            <td>
+              <template x-if="p.nginx">
+                <span class="badge"
+                  :class="{'bg-primary': p.nginx.type === 'production', 'bg-info': p.nginx.type === 'development', 'bg-secondary': p.nginx.type === 'tool'}"
+                  x-text="p.nginx.type"></span>
+              </template>
+              <template x-if="!p.nginx && p.service">
+                <span class="badge bg-dark">infra</span>
+              </template>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </template>
+
+  <!-- Detail Panel -->
+  <template x-if="selectedIdx !== null && sortedPaths[selectedIdx]">
+    <div class="card mt-2 mb-3">
+      <div class="card-header d-flex align-items-center">
+        <strong>Port <span x-text="sortedPaths[selectedIdx].external_port"></span> Detail</strong>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" @click="selectedIdx = null">Close</button>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <!-- Firewall Column -->
+          <div class="col-md-4">
+            <h6>Firewall</h6>
+            <template x-if="sortedPaths[selectedIdx].firewall">
+              <div>
+                <p class="mb-1"><strong>Action:</strong> <span x-text="sortedPaths[selectedIdx].firewall.action"></span></p>
+                <p class="mb-1"><strong>Rule:</strong> <span x-text="sortedPaths[selectedIdx].firewall.rule_summary"></span></p>
+              </div>
+            </template>
+            <template x-if="!sortedPaths[selectedIdx].firewall">
+              <p class="text-muted">No explicit firewall rule for this port</p>
+            </template>
+          </div>
+
+          <!-- Nginx Column -->
+          <div class="col-md-4">
+            <h6>Nginx</h6>
+            <template x-if="sortedPaths[selectedIdx].nginx">
+              <div>
+                <p class="mb-1"><strong>Service:</strong> <span x-text="sortedPaths[selectedIdx].nginx.service_name"></span></p>
+                <p class="mb-1"><strong>Project:</strong> <span x-text="sortedPaths[selectedIdx].nginx.project"></span></p>
+                <p class="mb-1"><strong>Listen:</strong> <span x-text="sortedPaths[selectedIdx].nginx.listen"></span></p>
+                <p class="mb-1"><strong>Backend:</strong> <span x-text="sortedPaths[selectedIdx].nginx.backend"></span></p>
+                <h6 class="mt-2">Locations</h6>
+                <table class="table table-sm table-bordered mb-0">
+                  <thead><tr><th>Path</th><th>Action</th><th>Target</th></tr></thead>
+                  <tbody>
+                    <template x-for="loc in sortedPaths[selectedIdx].nginx.locations" :key="loc.path">
+                      <tr>
+                        <td><code x-text="loc.path"></code></td>
+                        <td x-text="loc.action"></td>
+                        <td x-text="loc.target || '--'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+            <template x-if="!sortedPaths[selectedIdx].nginx">
+              <p class="text-muted">No nginx proxy for this port</p>
+            </template>
+          </div>
+
+          <!-- Service Column -->
+          <div class="col-md-4">
+            <h6>Service</h6>
+            <template x-if="sortedPaths[selectedIdx].service">
+              <div>
+                <p class="mb-1"><strong>Process:</strong> <span x-text="sortedPaths[selectedIdx].service.process"></span></p>
+                <p class="mb-1"><strong>PID:</strong> <span x-text="sortedPaths[selectedIdx].service.pid"></span></p>
+                <p class="mb-1"><strong>Bind:</strong> <span x-text="sortedPaths[selectedIdx].service.bind + ':' + sortedPaths[selectedIdx].service.port"></span></p>
+              </div>
+            </template>
+            <template x-if="!sortedPaths[selectedIdx].service">
+              <p class="text-muted">No matching service process</p>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- No data -->
+  <template x-if="!loading && paths.length === 0 && warnings.length === 0">
+    <div class="alert alert-info mt-3">No topology data available. Make sure the agent is reporting nginx and service state.</div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function topologyApp() {
+  return {
+    loading: true,
+    paths: [],
+    warnings: [],
+    selectedIdx: null,
+    sortCol: 'external_port',
+    sortAsc: true,
+
+    async loadTopology() {
+      this.loading = true;
+      try {
+        const resp = await fetch('{{ url_for("api.topology", node_id=node.id) }}');
+        const data = await resp.json();
+        this.paths = data.paths || [];
+        this.warnings = data.warnings || [];
+      } catch (e) {
+        this.warnings = [{type: 'error', detail: 'Failed to load topology: ' + e.message}];
+      }
+      this.loading = false;
+    },
+
+    get sortedPaths() {
+      const col = this.sortCol;
+      const asc = this.sortAsc;
+      return [...this.paths].sort((a, b) => {
+        let va = a[col], vb = b[col];
+        if (typeof va === 'number' && typeof vb === 'number') {
+          return asc ? va - vb : vb - va;
+        }
+        va = String(va || '');
+        vb = String(vb || '');
+        return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+      });
+    },
+
+    sortBy(col) {
+      if (this.sortCol === col) {
+        this.sortAsc = !this.sortAsc;
+      } else {
+        this.sortCol = col;
+        this.sortAsc = true;
+      }
+    },
+
+    toggleDetail(idx) {
+      this.selectedIdx = this.selectedIdx === idx ? null : idx;
+    },
+
+    statusBadge(status) {
+      const map = {
+        'ok': 'bg-success',
+        'no_proxy': 'bg-danger',
+        'service_down': 'bg-danger',
+        'no_proxy_local': 'bg-warning text-dark',
+        'no_firewall': 'bg-warning text-dark',
+        'unused': 'bg-secondary',
+        'unknown': 'bg-secondary',
+      };
+      return map[status] || 'bg-secondary';
+    },
+
+    statusLabel(status) {
+      const map = {
+        'ok': 'OK',
+        'no_proxy': 'No Proxy',
+        'service_down': 'Down',
+        'no_proxy_local': 'No Proxy',
+        'no_firewall': 'No FW',
+        'unused': 'Unused',
+        'unknown': '?',
+      };
+      return map[status] || status;
+    },
+  };
+}
+</script>
+{% endblock %}

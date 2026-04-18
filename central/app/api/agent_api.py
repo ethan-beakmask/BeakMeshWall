@@ -114,9 +114,19 @@ def agent_report(node=None):
             task.result = json.dumps(result.get("detail", ""))
             task.completed_at = now
 
-    # Store firewall state snapshot
-    if "fw_state" in data:
-        node.config_json = json.dumps(data["fw_state"])
+    # Store state snapshot (firewall + nginx + service)
+    state = {}
+    if node.config_json:
+        try:
+            state = json.loads(node.config_json)
+        except (json.JSONDecodeError, TypeError):
+            state = {}
+
+    for key in ("fw_state", "nginx_state", "service_state"):
+        if key in data:
+            state[key] = data[key]
+
+    node.config_json = json.dumps(state)
 
     db.session.commit()
     return jsonify({"status": "ok"})

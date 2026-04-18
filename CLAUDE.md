@@ -32,6 +32,7 @@
 - **P2**: nftables Driver + 規則 CRUD + Threat Feed API (done)
 - **P3**: Counters 回報 + External Table 觀察 + Audit Log (done)
 - **P4**: iptables/pf Driver + OIDC 可選對接 (done)
+- **P5**: Request Path Topology -- Agent module 化 + nginx/service collector + 三層路徑拓撲 UI (done)
 
 ## 開發環境
 - Central: 192.168.0.16

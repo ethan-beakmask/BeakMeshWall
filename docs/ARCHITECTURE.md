@@ -160,6 +160,39 @@ Agent                          Central
   └── GET /api/v1/agent/poll ────→│  下一輪
 ```
 
+## Agent Module Architecture
+
+The agent uses a modular plugin architecture. Each module implements
+`Collect()` to gather subsystem state and optionally `Execute()` to
+run tasks.
+
+```
+Agent
+├── module/                  Unified module interface
+│   ├── module.go            Module + Executor interfaces
+│   ├── firewall/            Wraps firewall drivers (nftables/iptables)
+│   ├── nginx/               Reads BMW-compliant nginx configs
+│   └── service/             Discovers listening sockets (ss -tlnp)
+├── driver/                  Firewall driver implementations
+│   ├── driver.go            Driver interface
+│   └── nftables/
+├── client/                  HTTP communication with Central
+└── config/                  YAML config with module toggles
+```
+
+Modules are enabled/disabled via config:
+```yaml
+modules:
+  firewall: true
+  nginx: true
+  service: true
+```
+
+All module states are reported in a single `POST /api/v1/agent/report`:
+- `fw_state` -- firewall rules (managed + external tables)
+- `nginx_state` -- BMW-compliant server blocks + non-compliant warnings
+- `service_state` -- listening sockets with process info
+
 ## 開發階段
 
 | 階段 | 內容 | 交付物 |
@@ -169,6 +202,7 @@ Agent                          Central
 | P2 | nftables Driver + 規則 CRUD + Threat Feed API | 核心功能可用 |
 | P3 | Counters 回報 + External Table 觀察 + Audit Log | 運維完整 |
 | P4 | iptables/pf Driver + OIDC 可選對接 | 擴展完成 |
+| P5 | Request Path Topology | 三層路徑拓撲觀察 |
 
 ## 開發環境
 

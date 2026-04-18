@@ -12,10 +12,13 @@ import (
 
 	"github.com/anthropics/beakmeshwall-agent/internal/client"
 	"github.com/anthropics/beakmeshwall-agent/internal/config"
-	"github.com/anthropics/beakmeshwall-agent/internal/driver/nftables"
+	"github.com/anthropics/beakmeshwall-agent/internal/module"
+	"github.com/anthropics/beakmeshwall-agent/internal/module/firewall"
+	"github.com/anthropics/beakmeshwall-agent/internal/module/nginx"
+	"github.com/anthropics/beakmeshwall-agent/internal/module/service"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	configPath := flag.String("config", "", "Path to agent config file (YAML)")
@@ -24,7 +27,7 @@ func main() {
 	flag.Parse()
 
 	if len(os.Args) == 1 {
-		fmt.Println("BeakMeshWall Agent - Firewall management agent")
+		fmt.Println("BeakMeshWall Agent - Multi-module system management agent")
 		fmt.Println()
 		fmt.Println("Usage:")
 		fmt.Println("  bmw-agent -config <path>              Start the agent")
@@ -41,6 +44,12 @@ func main() {
 		fmt.Println("  firewall:")
 		fmt.Println("    driver: nftables")
 		fmt.Println("    table: inet beakmeshwall")
+		fmt.Println("  modules:")
+		fmt.Println("    firewall: true")
+		fmt.Println("    nginx: true")
+		fmt.Println("    service: true")
+		fmt.Println("  nginx:")
+		fmt.Println("    config_path: /etc/nginx/sites-enabled")
 		os.Exit(0)
 	}
 
@@ -74,14 +83,38 @@ func main() {
 		log.Fatal("ERROR: central.token is required. Run with -register first.")
 	}
 
-	drv := nftables.New(cfg.Firewall.Table)
-	if err := drv.Init(); err != nil {
-		log.Fatalf("ERROR: init firewall driver: %v", err)
-	}
-	log.Printf("INFO: firewall driver initialized (table: %s)", cfg.Firewall.Table)
+	// Initialize modules
+	var modules []module.Module
+	var executor module.Executor
 
-	log.Printf("INFO: agent started, polling %s every %ds", cfg.Central.URL, cfg.Agent.PollInterval)
-	runPollLoop(c, drv, cfg.Agent.PollInterval)
+	if cfg.Modules.Firewall {
+		fwMod, err := firewall.New(cfg.Firewall.Driver, cfg.Firewall.Table)
+		if err != nil {
+			log.Fatalf("ERROR: init firewall module: %v", err)
+		}
+		modules = append(modules, fwMod)
+		executor = fwMod
+		log.Printf("INFO: firewall module enabled (driver: %s, table: %s)", cfg.Firewall.Driver, cfg.Firewall.Table)
+	}
+
+	if cfg.Modules.Nginx {
+		ngxMod := nginx.New(cfg.Nginx.ConfigPath)
+		modules = append(modules, ngxMod)
+		log.Printf("INFO: nginx module enabled (path: %s)", cfg.Nginx.ConfigPath)
+	}
+
+	if cfg.Modules.Service {
+		svcMod := service.New()
+		modules = append(modules, svcMod)
+		log.Printf("INFO: service module enabled")
+	}
+
+	if len(modules) == 0 {
+		log.Fatal("ERROR: no modules enabled")
+	}
+
+	log.Printf("INFO: agent started (%d modules), polling %s every %ds", len(modules), cfg.Central.URL, cfg.Agent.PollInterval)
+	runPollLoop(c, modules, executor, cfg.Agent.PollInterval)
 }
 
 func doRegister(c *client.Client, cfg *config.Config, hostname string) {
@@ -100,19 +133,19 @@ func doRegister(c *client.Client, cfg *config.Config, hostname string) {
 	log.Printf("INFO: add this token to your config file under central.token")
 }
 
-func runPollLoop(c *client.Client, drv *nftables.NFTDriver, intervalSec int) {
+func runPollLoop(c *client.Client, modules []module.Module, executor module.Executor, intervalSec int) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
 	ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
 	defer ticker.Stop()
 
-	doPoll(c, drv)
+	doPoll(c, modules, executor)
 
 	for {
 		select {
 		case <-ticker.C:
-			doPoll(c, drv)
+			doPoll(c, modules, executor)
 		case s := <-sig:
 			log.Printf("INFO: received %v, shutting down", s)
 			return
@@ -120,30 +153,43 @@ func runPollLoop(c *client.Client, drv *nftables.NFTDriver, intervalSec int) {
 	}
 }
 
-func doPoll(c *client.Client, drv *nftables.NFTDriver) {
+func doPoll(c *client.Client, modules []module.Module, executor module.Executor) {
 	resp, err := c.Poll()
 	if err != nil {
 		log.Printf("WARN: poll failed: %v", err)
 		return
 	}
 
-	// Execute tasks
+	// Execute tasks via the executor (firewall module)
 	var taskResults []map[string]interface{}
-	for _, task := range resp.Tasks {
-		result := executeTask(drv, task)
-		taskResults = append(taskResults, result)
+	if executor != nil {
+		for _, task := range resp.Tasks {
+			result := executeTask(executor, task)
+			taskResults = append(taskResults, result)
+		}
 	}
 
-	// Get current firewall state
-	state, err := drv.GetState()
-	if err != nil {
-		log.Printf("WARN: get firewall state: %v", err)
-		return
+	// Collect state from all modules
+	reportData := make(map[string]interface{})
+
+	for _, mod := range modules {
+		state, err := mod.Collect()
+		if err != nil {
+			log.Printf("WARN: %s collect failed: %v", mod.Name(), err)
+			continue
+		}
+
+		// Map module name to report key
+		switch mod.Name() {
+		case "firewall":
+			reportData["fw_state"] = state
+		case "nginx":
+			reportData["nginx_state"] = state
+		case "service":
+			reportData["service_state"] = state
+		}
 	}
 
-	reportData := map[string]interface{}{
-		"fw_state": state,
-	}
 	if len(taskResults) > 0 {
 		reportData["task_results"] = taskResults
 	}
@@ -154,13 +200,13 @@ func doPoll(c *client.Client, drv *nftables.NFTDriver) {
 	}
 
 	if len(resp.Tasks) > 0 {
-		log.Printf("INFO: poll ok, executed %d tasks, state reported", len(resp.Tasks))
+		log.Printf("INFO: poll ok, executed %d tasks, state reported (%d modules)", len(resp.Tasks), len(modules))
 	} else {
-		log.Printf("INFO: poll ok, no tasks, state reported")
+		log.Printf("INFO: poll ok, state reported (%d modules)", len(modules))
 	}
 }
 
-func executeTask(drv *nftables.NFTDriver, task client.TaskItem) map[string]interface{} {
+func executeTask(executor module.Executor, task client.TaskItem) map[string]interface{} {
 	result := map[string]interface{}{
 		"task_id": task.ID,
 		"success": false,
@@ -173,62 +219,10 @@ func executeTask(drv *nftables.NFTDriver, task client.TaskItem) map[string]inter
 		return result
 	}
 
-	var execErr error
-	switch task.Action {
-	case "block_ip":
-		ip, _ := payload["ip"].(string)
-		comment, _ := payload["comment"].(string)
-		if ip == "" {
-			result["detail"] = "missing ip"
-			break
-		}
-		execErr = drv.BlockIP(ip, comment)
-		log.Printf("INFO: task %d: block_ip %s -> %v", task.ID, ip, execErr)
-
-	case "unblock_ip":
-		ip, _ := payload["ip"].(string)
-		if ip == "" {
-			result["detail"] = "missing ip"
-			break
-		}
-		execErr = drv.UnblockIP(ip)
-		log.Printf("INFO: task %d: unblock_ip %s -> %v", task.ID, ip, execErr)
-
-	case "add_rule":
-		chain, _ := payload["chain"].(string)
-		rule, _ := payload["rule"].(string)
-		comment, _ := payload["comment"].(string)
-		if rule == "" {
-			result["detail"] = "missing rule"
-			break
-		}
-		if chain == "" {
-			chain = "filter_input"
-		}
-		execErr = drv.AddRule(chain, rule, comment)
-		log.Printf("INFO: task %d: add_rule [%s] %s -> %v", task.ID, chain, rule, execErr)
-
-	case "delete_rule":
-		chain, _ := payload["chain"].(string)
-		handle, _ := payload["handle"].(float64)
-		if chain == "" {
-			chain = "filter_input"
-		}
-		execErr = drv.DeleteRule(chain, int(handle))
-		log.Printf("INFO: task %d: delete_rule [%s] handle %d -> %v", task.ID, chain, int(handle), execErr)
-
-	default:
-		result["detail"] = fmt.Sprintf("unknown action: %s", task.Action)
-		log.Printf("WARN: task %d: unknown action: %s", task.ID, task.Action)
-		return result
-	}
-
-	if execErr != nil {
-		result["detail"] = execErr.Error()
-	} else {
-		result["success"] = true
-		result["detail"] = "ok"
-	}
+	success, detail := executor.Execute(task.Action, payload)
+	result["success"] = success
+	result["detail"] = detail
+	log.Printf("INFO: task %d: %s -> success=%v detail=%s", task.ID, task.Action, success, detail)
 
 	return result
 }

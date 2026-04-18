@@ -26,13 +26,33 @@ def nodes():
     return render_template("dashboard/nodes.html", nodes=nodes)
 
 
+@dashboard_bp.route("/topology/<int:node_id>")
+@login_required
+def topology(node_id):
+    node = Node.query.get_or_404(node_id)
+    state_data = {}
+    if node.config_json:
+        state_data = json.loads(node.config_json)
+
+    return render_template(
+        "dashboard/topology.html",
+        node=node,
+        state_data=state_data,
+    )
+
+
 @dashboard_bp.route("/nodes/<int:node_id>")
 @login_required
 def node_detail(node_id):
     node = Node.query.get_or_404(node_id)
     fw_state = None
     if node.config_json:
-        fw_state = json.loads(node.config_json)
+        state_data = json.loads(node.config_json)
+        # Support both old format (fw_state directly) and new format (nested under fw_state key)
+        if "fw_state" in state_data:
+            fw_state = state_data["fw_state"]
+        elif "managed_table" in state_data or "external_tables" in state_data:
+            fw_state = state_data
     tasks = Task.query.filter_by(node_id=node.id).order_by(
         Task.created_at.desc()
     ).limit(20).all()
