@@ -30,6 +30,7 @@ def topology(node_id):
 
     # Build lookup indexes
     fw_ports = _build_fw_port_index(fw_state)
+    fw_global = _detect_fw_global_policy(fw_state)
     nginx_by_port = _build_nginx_port_index(nginx_state)
     svc_by_port = _build_service_port_index(service_state)
 
@@ -40,9 +41,15 @@ def topology(node_id):
     warnings = []
 
     for port in all_ports:
-        fw_info = fw_ports.get(port)
+        fw_info = fw_ports.get(port) or fw_global
         ngx_info = nginx_by_port.get(port)
+
+        # Service join: try external_port first, then nginx backend port
         svc_info = svc_by_port.get(port)
+        if not svc_info and ngx_info:
+            backend_port = _parse_backend_port(ngx_info.get("backend", ""))
+            if backend_port:
+                svc_info = svc_by_port.get(backend_port)
 
         status = _determine_status(fw_info, ngx_info, svc_info)
 
@@ -126,6 +133,98 @@ def _extract_port_from_expr(expr):
             if payload.get("field") == "dport":
                 if isinstance(right, (int, float)):
                     return int(right)
+    return None
+
+
+def _detect_fw_global_policy(fw_state):
+    """Detect source-IP whitelist or other global accept policies from external tables.
+
+    Returns a dict like {"action": "accept_global", "policy_type": "ip_whitelist", ...}
+    if a global policy is found, or None if per-port rules should be used.
+    """
+    if not fw_state:
+        return None
+
+    for table in fw_state.get("external_tables", []):
+        for chain in table.get("chains", []):
+            if chain.get("hook") != "input":
+                continue
+            rules = chain.get("rules") or []
+
+            # Look for pattern: saddr ACCEPT rules + final DROP
+            # This indicates a source-IP whitelist (all ports open to whitelisted IPs)
+            saddr_accepts = []
+            has_final_drop = False
+
+            for rule in rules:
+                expr_raw = rule.get("expr", "")
+                expr_list = _parse_expr(expr_raw)
+                if not expr_list:
+                    continue
+
+                has_saddr = any(
+                    isinstance(item, dict)
+                    and isinstance(item.get("match", {}).get("left", {}), dict)
+                    and item["match"]["left"].get("payload", {}).get("field") == "saddr"
+                    for item in expr_list
+                    if isinstance(item, dict) and "match" in item
+                )
+                has_accept = any(
+                    isinstance(item, dict) and "accept" in item
+                    for item in expr_list
+                )
+                has_drop = any(
+                    isinstance(item, dict) and "drop" in item
+                    for item in expr_list
+                )
+
+                if has_saddr and has_accept:
+                    saddr_accepts.append(rule)
+                if has_drop and not has_saddr:
+                    has_final_drop = True
+
+            if saddr_accepts and has_final_drop:
+                return {
+                    "action": "accept_global",
+                    "policy_type": "ip_whitelist",
+                    "rule_summary": "{} whitelisted IPs, default drop".format(
+                        len(saddr_accepts)
+                    ),
+                    "table": "{} {}".format(
+                        table.get("family", ""), table.get("name", "")
+                    ),
+                }
+
+    return None
+
+
+def _parse_expr(expr_raw):
+    """Parse nft rule expression into a list of dicts."""
+    if isinstance(expr_raw, list):
+        return expr_raw
+    if isinstance(expr_raw, str):
+        try:
+            return json.loads(expr_raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _parse_backend_port(backend):
+    """Extract port from backend string like '127.0.0.1:5171'."""
+    if not backend:
+        return None
+    # Handle [::1]:port and host:port
+    if "]:" in backend:
+        try:
+            return int(backend.rsplit(":", 1)[1])
+        except (ValueError, IndexError):
+            return None
+    if ":" in backend:
+        try:
+            return int(backend.rsplit(":", 1)[1])
+        except (ValueError, IndexError):
+            return None
     return None
 
 
