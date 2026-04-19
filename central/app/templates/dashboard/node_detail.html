@@ -13,6 +13,7 @@
     <a href="{{ url_for('dashboard.nodes') }}" class="btn btn-sm btn-outline-secondary">Back to Nodes</a>
   </div>
 
+  <!-- Node Info -->
   <div class="row mt-3">
     <div class="col-md-4">
       <div class="card">
@@ -70,119 +71,263 @@
     </div>
   </div>
 
-  <!-- Managed Table -->
-  <div class="card mt-3">
-    {% if fw_state and fw_state.managed_table %}
-    <div class="card-header"><strong>Managed Table: {{ fw_state.managed_table.family }} {{ fw_state.managed_table.name }}</strong></div>
-    <div class="card-body p-0">
-      {% for chain in fw_state.managed_table.chains %}
-      <div class="p-2 border-bottom bg-light">
-        <strong>Chain: {{ chain.name }}</strong>
-        {% if chain.type %} ({{ chain.type }}/{{ chain.hook }}, priority {{ chain.priority }}, policy {{ chain.policy }}){% endif %}
+  <!-- Tabs -->
+  <ul class="nav nav-tabs mt-3">
+    <li class="nav-item">
+      <a class="nav-link" :class="tab === 'firewall' && 'active'" href="#" @click.prevent="tab='firewall'">Firewall</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" :class="tab === 'accounts' && 'active'" href="#" @click.prevent="tab='accounts'">
+        User Accounts
+        {% if system_info and system_info.users %}
+          <span class="badge bg-secondary ms-1">{{ system_info.users|length }}</span>
+        {% endif %}
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" :class="tab === 'tasks' && 'active'" href="#" @click.prevent="tab='tasks'">Recent Tasks</a>
+    </li>
+  </ul>
+
+  <!-- ================================================================== -->
+  <!-- Tab: Firewall                                                       -->
+  <!-- ================================================================== -->
+  <div x-show="tab === 'firewall'" class="mt-3">
+    <!-- Managed Table -->
+    <div class="card">
+      {% if fw_state and fw_state.managed_table %}
+      <div class="card-header"><strong>Managed Table: {{ fw_state.managed_table.family }} {{ fw_state.managed_table.name }}</strong></div>
+      <div class="card-body p-0">
+        {% for chain in fw_state.managed_table.chains %}
+        <div class="p-2 border-bottom bg-light">
+          <strong>Chain: {{ chain.name }}</strong>
+          {% if chain.type %} ({{ chain.type }}/{{ chain.hook }}, priority {{ chain.priority }}, policy {{ chain.policy }}){% endif %}
+        </div>
+        {% if chain.rules %}
+        <table class="table table-sm table-bordered mb-0">
+          <thead>
+            <tr><th style="width:40px">Handle</th><th style="width:15%">Expression</th><th>Comment</th><th style="width:50px">Action</th></tr>
+          </thead>
+          <tbody>
+            {% for rule in chain.rules %}
+            <tr>
+              <td>{{ rule.handle }}</td>
+              <td><code style="font-size:0.8rem">{{ rule.expr }}</code></td>
+              <td>{{ rule.comment or '' }}</td>
+              <td>
+                <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                        @click="doDeleteRule('{{ chain.name }}', {{ rule.handle }}, $el)"
+                        :disabled="busy">Del</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="p-2 text-muted">No rules</div>
+        {% endif %}
+        {% endfor %}
       </div>
-      {% if chain.rules %}
-      <table class="table table-sm table-bordered mb-0">
-        <thead>
-          <tr><th style="width:40px">Handle</th><th style="width:15%">Expression</th><th>Comment</th><th style="width:50px">Action</th></tr>
-        </thead>
-        <tbody>
-          {% for rule in chain.rules %}
-          <tr>
-            <td>{{ rule.handle }}</td>
-            <td><code style="font-size:0.8rem">{{ rule.expr }}</code></td>
-            <td>{{ rule.comment or '' }}</td>
-            <td>
-              <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                      @click="doDeleteRule('{{ chain.name }}', {{ rule.handle }}, $el)"
-                      :disabled="busy">Del</button>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
       {% else %}
-      <div class="p-2 text-muted">No rules</div>
+      <div class="card-header"><strong>Managed Table</strong></div>
+      <div class="card-body text-muted">No firewall state reported yet.</div>
       {% endif %}
-      {% endfor %}
     </div>
-    {% else %}
-    <div class="card-header"><strong>Managed Table</strong></div>
-    <div class="card-body text-muted">No firewall state reported yet.</div>
+
+    <!-- External Tables -->
+    {% if fw_state and fw_state.external_tables %}
+    <div class="card mt-3">
+      <div class="card-header"><strong>External Tables (read-only)</strong></div>
+      <div class="card-body p-0">
+        {% for tbl in fw_state.external_tables %}
+        <div x-data="{ expanded: false }">
+          <div class="p-2 border-bottom d-flex align-items-center" style="cursor:pointer" @click="expanded = !expanded">
+            <span x-text="expanded ? '&#9660;' : '&#9654;'" class="me-2" style="font-size:0.7rem"></span>
+            <strong>{{ tbl.family }} {{ tbl.name }}</strong>
+            <span class="text-muted ms-2">({{ tbl.chains|length }} chains)</span>
+          </div>
+          <div x-show="expanded" x-transition style="background: #fafafa;">
+            {% for chain in tbl.chains %}
+            <div x-data="{ chainOpen: false }" class="ps-4 py-1 border-bottom" style="font-size: 0.85rem;">
+              <div style="cursor:pointer" @click="chainOpen = !chainOpen" class="d-flex align-items-center">
+                <span x-text="chainOpen ? '&#9660;' : '&#9654;'" class="me-2" style="font-size:0.65rem"></span>
+                <strong>{{ chain.name }}</strong>
+                {% if chain.policy %}<span class="text-muted ms-2">({{ chain.policy }})</span>{% endif %}
+                {% if chain.rules %}<span class="badge bg-secondary ms-2">{{ chain.rules|length }}</span>{% endif %}
+              </div>
+              <div x-show="chainOpen" x-transition>
+              {% if chain.rules %}
+              <table class="table table-sm mb-0 mt-1" style="font-size: 0.8rem;">
+                <thead><tr><th style="width:40px">Handle</th><th style="width:15%">Expression</th><th>Comment</th></tr></thead>
+                <tbody>
+                  {% for rule in chain.rules %}
+                  <tr>
+                    <td>{{ rule.handle }}</td>
+                    <td><code>{{ rule.expr }}</code></td>
+                    <td>{{ rule.comment or '' }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% else %}
+              <div class="text-muted">(no rules)</div>
+              {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
     {% endif %}
   </div>
 
-  <!-- External Tables -->
-  {% if fw_state and fw_state.external_tables %}
-  <div class="card mt-3">
-    <div class="card-header"><strong>External Tables (read-only)</strong></div>
-    <div class="card-body p-0">
-      {% for tbl in fw_state.external_tables %}
-      <div x-data="{ expanded: false }">
-        <div class="p-2 border-bottom d-flex align-items-center" style="cursor:pointer" @click="expanded = !expanded">
-          <span x-text="expanded ? '&#9660;' : '&#9654;'" class="me-2" style="font-size:0.7rem"></span>
-          <strong>{{ tbl.family }} {{ tbl.name }}</strong>
-          <span class="text-muted ms-2">({{ tbl.chains|length }} chains)</span>
-        </div>
-        <div x-show="expanded" x-transition style="background: #fafafa;">
-          {% for chain in tbl.chains %}
-          <div x-data="{ chainOpen: false }" class="ps-4 py-1 border-bottom" style="font-size: 0.85rem;">
-            <div style="cursor:pointer" @click="chainOpen = !chainOpen" class="d-flex align-items-center">
-              <span x-text="chainOpen ? '&#9660;' : '&#9654;'" class="me-2" style="font-size:0.65rem"></span>
-              <strong>{{ chain.name }}</strong>
-              {% if chain.policy %}<span class="text-muted ms-2">({{ chain.policy }})</span>{% endif %}
-              {% if chain.rules %}<span class="badge bg-secondary ms-2">{{ chain.rules|length }}</span>{% endif %}
-            </div>
-            <div x-show="chainOpen" x-transition>
-            {% if chain.rules %}
-            <table class="table table-sm mb-0 mt-1" style="font-size: 0.8rem;">
-              <thead><tr><th style="width:40px">Handle</th><th style="width:15%">Expression</th><th>Comment</th></tr></thead>
-              <tbody>
-                {% for rule in chain.rules %}
-                <tr>
-                  <td>{{ rule.handle }}</td>
-                  <td><code>{{ rule.expr }}</code></td>
-                  <td>{{ rule.comment or '' }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            {% else %}
-            <div class="text-muted">(no rules)</div>
-            {% endif %}
-            </div>
+  <!-- ================================================================== -->
+  <!-- Tab: User Accounts                                                  -->
+  <!-- ================================================================== -->
+  <div x-show="tab === 'accounts'" class="mt-3">
+    {% if system_info and system_info.users %}
+
+    <!-- Summary -->
+    {% set human_users = system_info.users | selectattr('account_type', 'equalto', 'human') | list %}
+    {% set sudo_users = system_info.users | selectattr('can_sudo') | list %}
+    {% set loginable_users = system_info.users | selectattr('can_login') | list %}
+    <div class="row mb-3">
+      <div class="col-md-3">
+        <div class="card text-center">
+          <div class="card-body py-2">
+            <div style="font-size:1.5rem; font-weight:bold;">{{ system_info.users|length }}</div>
+            <div class="text-muted" style="font-size:0.8rem;">Total Accounts</div>
           </div>
-          {% endfor %}
         </div>
       </div>
-      {% endfor %}
+      <div class="col-md-3">
+        <div class="card text-center">
+          <div class="card-body py-2">
+            <div style="font-size:1.5rem; font-weight:bold;">{{ human_users|length }}</div>
+            <div class="text-muted" style="font-size:0.8rem;">Human Accounts</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card text-center border-warning">
+          <div class="card-body py-2">
+            <div style="font-size:1.5rem; font-weight:bold; color:#dc3545;">{{ sudo_users|length }}</div>
+            <div class="text-muted" style="font-size:0.8rem;">Sudo Privileged</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card text-center">
+          <div class="card-body py-2">
+            <div style="font-size:1.5rem; font-weight:bold;">{{ loginable_users|length }}</div>
+            <div class="text-muted" style="font-size:0.8rem;">Can Login</div>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
-  {% endif %}
 
-  <!-- Recent Tasks -->
-  <div class="card mt-3">
-    <div class="card-header"><strong>Recent Tasks</strong></div>
-    <div class="card-body p-0">
-      <table class="table table-sm mb-0">
-        <thead><tr><th>ID</th><th>Action</th><th>Payload</th><th>Status</th><th>Created</th><th>By</th></tr></thead>
-        <tbody>
-          {% for t in tasks %}
-          <tr>
-            <td>{{ t.id }}</td>
-            <td>{{ t.action }}</td>
-            <td><code style="font-size:0.8rem">{{ t.payload }}</code></td>
-            <td>
-              {% if t.status == 'success' %}<span class="badge bg-success">{{ t.status }}</span>
-              {% elif t.status == 'failed' %}<span class="badge bg-danger">{{ t.status }}</span>
-              {% elif t.status == 'sent' %}<span class="badge bg-info">{{ t.status }}</span>
-              {% else %}<span class="badge bg-warning text-dark">{{ t.status }}</span>{% endif %}
-            </td>
-            <td>{{ t.created_at.strftime('%H:%M:%S') if t.created_at else '-' }}</td>
-            <td>{{ t.created_by or '-' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <!-- Filter -->
+    <div x-data="{ showSystem: false }" class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>User Accounts</strong>
+        <label class="form-check-label" style="font-size:0.85rem;">
+          <input type="checkbox" class="form-check-input" x-model="showSystem"> Show system accounts
+        </label>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0" style="font-size:0.85rem;">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>UID</th>
+              <th>Type</th>
+              <th>Groups</th>
+              <th>Shell</th>
+              <th>Sudo</th>
+              <th>Created</th>
+              <th>Last Login</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in system_info.users %}
+            <tr x-show="showSystem || '{{ u.account_type }}' === 'human'"
+                class="{% if u.can_sudo %}table-warning{% endif %}">
+              <td>
+                <strong>{{ u.username }}</strong>
+                {% if u.comment %}<br><span class="text-muted" style="font-size:0.75rem;">{{ u.comment }}</span>{% endif %}
+              </td>
+              <td>{{ u.uid }}</td>
+              <td>
+                {% if u.account_type == 'human' %}
+                  <span class="badge bg-primary">human</span>
+                {% else %}
+                  <span class="badge bg-secondary">system</span>
+                {% endif %}
+              </td>
+              <td style="font-size:0.8rem;">{{ u.groups | join(', ') if u.groups else '-' }}</td>
+              <td><code style="font-size:0.75rem;">{{ u.shell }}</code></td>
+              <td>
+                {% if u.can_sudo %}
+                  <span class="badge bg-danger">sudo</span>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td>{{ u.created_date or '-' }}</td>
+              <td>
+                {% if u.last_login == 'never' %}
+                  <span class="text-muted">never</span>
+                {% else %}
+                  {{ u.last_login or '-' }}
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% else %}
+    <div class="card">
+      <div class="card-header"><strong>User Accounts</strong></div>
+      <div class="card-body text-muted">
+        No account data reported yet. Ensure the agent has <code>sysinfo: true</code> in modules config.
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- Tab: Recent Tasks                                                   -->
+  <!-- ================================================================== -->
+  <div x-show="tab === 'tasks'" class="mt-3">
+    <div class="card">
+      <div class="card-header"><strong>Recent Tasks</strong></div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>ID</th><th>Action</th><th>Payload</th><th>Status</th><th>Created</th><th>By</th></tr></thead>
+          <tbody>
+            {% for t in tasks %}
+            <tr>
+              <td>{{ t.id }}</td>
+              <td>{{ t.action }}</td>
+              <td><code style="font-size:0.8rem">{{ t.payload }}</code></td>
+              <td>
+                {% if t.status == 'success' %}<span class="badge bg-success">{{ t.status }}</span>
+                {% elif t.status == 'failed' %}<span class="badge bg-danger">{{ t.status }}</span>
+                {% elif t.status == 'sent' %}<span class="badge bg-info">{{ t.status }}</span>
+                {% else %}<span class="badge bg-warning text-dark">{{ t.status }}</span>{% endif %}
+              </td>
+              <td>{{ t.created_at.strftime('%H:%M:%S') if t.created_at else '-' }}</td>
+              <td>{{ t.created_by or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -191,6 +336,7 @@
 <script>
 function nodeManager() {
   return {
+    tab: 'firewall',
     blockIP: '', blockComment: '', unblockIP: '',
     actionMsg: '', actionOk: false, busy: false,
     init() {},
@@ -238,10 +384,9 @@ function nodeManager() {
         this.actionMsg = 'Task #' + d.task_id + ' created, waiting for agent...';
         this.actionOk = true;
 
-        // Poll task status until completed
         const taskId = d.task_id;
-        const maxWait = 60;  // seconds
-        const interval = 2;  // seconds
+        const maxWait = 60;
+        const interval = 2;
         let elapsed = 0;
 
         while (elapsed < maxWait) {
@@ -255,7 +400,6 @@ function nodeManager() {
           if (sd.status === 'success') {
             this.actionMsg = 'Task #' + taskId + ' completed successfully.';
             this.actionOk = true;
-            // Reload page to show updated firewall state
             await this.sleep(500);
             window.location.reload();
             return;

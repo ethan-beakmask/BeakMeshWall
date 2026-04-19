@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Help - BeakMeshWall{% endblock %}
+{% block content %}
+
+{% if lang == 'zh' %}
+{# ================================================================== #}
+{# Chinese version                                                     #}
+{# ================================================================== #}
+<h4>Threat Feed API 整合說明</h4>
+<p class="text-muted">BeakMeshWall 提供 REST API 供外部系統（如 SIEM、WAF、登入監控平台）自動推送 IP 封鎖/解除請求。</p>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>1. 建立信任 -- API Key</strong></div>
+  <div class="card-body">
+    <p>外部系統需要一把 API Key 才能呼叫 BeakMeshWall API。API Key 由管理員在 Central Server 上透過 CLI 產生。</p>
+    <h6>產生 API Key</h6>
+    <pre class="bg-light p-3"><code># 產生 threat scope 的 key（只能 block / unblock / 讀取白名單）
+flask create-api-key --name "beakplatform-prod" --scope threat
+
+# 產生 full scope 的 key（可修改白名單）
+flask create-api-key --name "soc-admin" --scope full</code></pre>
+    <p>產生後會顯示完整的 key，<strong>只會顯示一次</strong>，請妥善保存。</p>
+
+    <h6>API Key Scope（權限範圍）</h6>
+    <table class="table table-sm table-bordered">
+      <thead><tr><th>Scope</th><th>block / unblock</th><th>讀取白名單</th><th>修改白名單</th></tr></thead>
+      <tbody>
+        <tr><td><code>threat</code></td><td>可以</td><td>可以</td><td>不可以</td></tr>
+        <tr><td><code>full</code></td><td>可以</td><td>可以</td><td>可以</td></tr>
+      </tbody>
+    </table>
+
+    <h6>管理 API Key</h6>
+    <pre class="bg-light p-3"><code># 列出所有 API Key
+flask list-api-keys</code></pre>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>2. 傳送封鎖 / 解除指令</strong></div>
+  <div class="card-body">
+    <p>所有 API 請求需在 HTTP Header 帶入 <code>X-API-Key</code>。</p>
+
+    <h6>封鎖 IP（Block）</h6>
+    <pre class="bg-light p-3"><code>curl -X POST https://&lt;central&gt;/api/v1/threat/block \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: &lt;your_api_key&gt;" \
+  -d '{
+    "source": "beakplatform",
+    "ip": "203.0.113.50",
+    "reason": "brute_force",
+    "detail": "login_fail_10_in_5m",
+    "duration": 3600
+  }'</code></pre>
+    <table class="table table-sm table-bordered mt-2">
+      <thead><tr><th>欄位</th><th>必填</th><th>說明</th></tr></thead>
+      <tbody>
+        <tr><td><code>ip</code></td><td>是</td><td>要封鎖的 IP 或 CIDR（支援 IPv4/IPv6）</td></tr>
+        <tr><td><code>source</code></td><td>否</td><td>來源系統名稱，預設 "external"</td></tr>
+        <tr><td><code>reason</code></td><td>否</td><td>封鎖原因（如 brute_force、port_scan）</td></tr>
+        <tr><td><code>detail</code></td><td>否</td><td>詳細說明</td></tr>
+        <tr><td><code>duration</code></td><td>否</td><td>封鎖秒數，省略則永久封鎖</td></tr>
+      </tbody>
+    </table>
+
+    <h6>解除封鎖（Unblock）</h6>
+    <pre class="bg-light p-3"><code>curl -X POST https://&lt;central&gt;/api/v1/threat/unblock \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: &lt;your_api_key&gt;" \
+  -d '{"ip": "203.0.113.50"}'</code></pre>
+
+    <h6>查詢目前封鎖清單</h6>
+    <pre class="bg-light p-3"><code>curl https://&lt;central&gt;/api/v1/threat/blocks \
+  -H "X-API-Key: &lt;your_api_key&gt;"</code></pre>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>3. 白名單機制</strong></div>
+  <div class="card-body">
+    <p><strong>白名單優先原則</strong>：白名單內的 IP/CIDR 無法被封鎖。任何 block 請求命中白名單時，會被拒絕並回傳 HTTP 409。</p>
+    <p>白名單的增刪需要 <code>full</code> scope 的 API Key，或由管理員透過 Web UI / CLI 操作。</p>
+
+    <h6>CLI 管理白名單</h6>
+    <pre class="bg-light p-3"><code># 新增
+flask whitelist-add --ip "192.168.0.0/24" --description "Internal network"
+
+# 列出
+flask whitelist-list
+
+# 移除
+flask whitelist-remove --id 1</code></pre>
+
+    <h6>API 管理白名單（需 full scope）</h6>
+    <pre class="bg-light p-3"><code># 列出
+curl https://&lt;central&gt;/api/v1/threat/whitelist \
+  -H "X-API-Key: &lt;your_api_key&gt;"
+
+# 新增
+curl -X POST https://&lt;central&gt;/api/v1/threat/whitelist \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: &lt;full_scope_key&gt;" \
+  -d '{"ip_cidr": "10.0.0.0/8", "description": "Private network"}'
+
+# 移除
+curl -X DELETE https://&lt;central&gt;/api/v1/threat/whitelist/&lt;id&gt; \
+  -H "X-API-Key: &lt;full_scope_key&gt;"</code></pre>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>4. 回應代碼</strong></div>
+  <div class="card-body">
+    <table class="table table-sm table-bordered">
+      <thead><tr><th>HTTP Code</th><th>status</th><th>說明</th></tr></thead>
+      <tbody>
+        <tr><td>201</td><td><code>accepted</code></td><td>封鎖成功，任務已派發到節點</td></tr>
+        <tr><td>200</td><td><code>accepted</code></td><td>解除封鎖成功</td></tr>
+        <tr><td>409</td><td><code>rejected</code></td><td>命中白名單，封鎖被拒絕</td></tr>
+        <tr><td>409</td><td><code>already_blocked</code></td><td>IP 已在封鎖中</td></tr>
+        <tr><td>401</td><td>-</td><td>API Key 缺失或無效</td></tr>
+        <tr><td>403</td><td>-</td><td>API Key scope 不足</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>5. EDL 匯出（硬體防火牆整合）</strong></div>
+  <div class="card-body">
+    <p>每次黑白名單變動時，BeakMeshWall 會自動匯出純文字檔：</p>
+    <table class="table table-sm table-bordered">
+      <thead><tr><th>檔案</th><th>內容</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>blocklist.txt</code></td><td>目前活躍的封鎖 IP，一行一個</td><td>Palo Alto EDL / Fortinet External Connector</td></tr>
+        <tr><td><code>whitelist.txt</code></td><td>白名單 IP/CIDR，一行一個</td><td>防火牆允許清單</td></tr>
+      </tbody>
+    </table>
+    <p>匯出路徑可透過環境變數 <code>BMW_EDL_EXPORT_DIR</code> 設定。</p>
+  </div>
+</div>
+
+{% else %}
+{# ================================================================== #}
+{# English version (default)                                           #}
+{# ================================================================== #}
+<h4>Threat Feed API Integration Guide</h4>
+<p class="text-muted">BeakMeshWall provides a REST API for external systems (SIEM, WAF, login monitoring platforms) to automatically push IP block/unblock requests.</p>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>1. Establishing Trust -- API Key</strong></div>
+  <div class="card-body">
+    <p>External systems need an API Key to call BeakMeshWall APIs. Keys are generated by an administrator on the Central Server via CLI.</p>
+    <h6>Generate an API Key</h6>
+    <pre class="bg-light p-3"><code># Generate a threat-scope key (block / unblock / read whitelist only)
+flask create-api-key --name "beakplatform-prod" --scope threat
+
+# Generate a full-scope key (can also modify whitelist)
+flask create-api-key --name "soc-admin" --scope full</code></pre>
+    <p>The full key is displayed <strong>only once</strong> upon creation. Store it securely.</p>
+
+    <h6>API Key Scopes</h6>
+    <table class="table table-sm table-bordered">
+      <thead><tr><th>Scope</th><th>block / unblock</th><th>Read whitelist</th><th>Modify whitelist</th></tr></thead>
+      <tbody>
+        <tr><td><code>threat</code></td><td>Yes</td><td>Yes</td><td>No</td></tr>
+        <tr><td><code>full</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      </tbody>
+    </table>
+
+    <h6>Manage API Keys</h6>
+    <pre class="bg-light p-3"><code># List all API keys
+flask list-api-keys</code></pre>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>2. Sending Block / Unblock Commands</strong></div>
+  <div class="card-body">
+    <p>All API requests require the <code>X-API-Key</code> HTTP header.</p>
+
+    <h6>Block an IP</h6>
+    <pre class="bg-light p-3"><code>curl -X POST https://&lt;central&gt;/api/v1/threat/block \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: &lt;your_api_key&gt;" \
+  -d '{
+    "source": "beakplatform",
+    "ip": "203.0.113.50",
+    "reason": "brute_force",
+    "detail": "login_fail_10_in_5m",
+    "duration": 3600
+  }'</code></pre>
+    <table class="table table-sm table-bordered mt-2">
+      <thead><tr><th>Field</th><th>Required</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>ip</code></td><td>Yes</td><td>IP address or CIDR to block (IPv4/IPv6)</td></tr>
+        <tr><td><code>source</code></td><td>No</td><td>Source system name, defaults to "external"</td></tr>
+        <tr><td><code>reason</code></td><td>No</td><td>Block reason (e.g. brute_force, port_scan)</td></tr>
+        <tr><td><code>detail</code></td><td>No</td><td>Detailed description</td></tr>
+        <tr><td><code>duration</code></td><td>No</td><td>Block duration in seconds. Omit for permanent.</td></tr>
+      </tbody>
+    </table>
+
+    <h6>Unblock an IP</h6>
+    <pre class="bg-light p-3"><code>curl -X POST https://&lt;central&gt;/api/v1/threat/unblock \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: &lt;your_api_key&gt;" \
+  -d '{"ip": "203.0.113.50"}'</code></pre>
+
+    <h6>Query Active Blocks</h6>
+    <pre class="bg-light p-3"><code>curl https://&lt;central&gt;/api/v1/threat/blocks \
+  -H "X-API-Key: &lt;your_api_key&gt;"</code></pre>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>3. Whitelist Mechanism</strong></div>
+  <div class="card-body">
+    <p><strong>Whitelist-first principle</strong>: IPs/CIDRs on the whitelist can never be blocked. Any block request matching a whitelist entry is rejected with HTTP 409.</p>
+    <p>Whitelist modifications require a <code>full</code> scope API Key, or can be done by an administrator via Web UI / CLI.</p>
+
+    <h6>CLI Whitelist Management</h6>
+    <pre class="bg-light p-3"><code># Add
+flask whitelist-add --ip "192.168.0.0/24" --description "Internal network"
+
+# List
+flask whitelist-list
+
+# Remove
+flask whitelist-remove --id 1</code></pre>
+
+    <h6>API Whitelist Management (requires full scope)</h6>
+    <pre class="bg-light p-3"><code># List
+curl https://&lt;central&gt;/api/v1/threat/whitelist \
+  -H "X-API-Key: &lt;your_api_key&gt;"
+
+# Add
+curl -X POST https://&lt;central&gt;/api/v1/threat/whitelist \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: &lt;full_scope_key&gt;" \
+  -d '{"ip_cidr": "10.0.0.0/8", "description": "Private network"}'
+
+# Remove
+curl -X DELETE https://&lt;central&gt;/api/v1/threat/whitelist/&lt;id&gt; \
+  -H "X-API-Key: &lt;full_scope_key&gt;"</code></pre>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>4. Response Codes</strong></div>
+  <div class="card-body">
+    <table class="table table-sm table-bordered">
+      <thead><tr><th>HTTP Code</th><th>status</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>201</td><td><code>accepted</code></td><td>Block accepted, tasks dispatched to nodes</td></tr>
+        <tr><td>200</td><td><code>accepted</code></td><td>Unblock successful</td></tr>
+        <tr><td>409</td><td><code>rejected</code></td><td>Whitelist hit, block refused</td></tr>
+        <tr><td>409</td><td><code>already_blocked</code></td><td>IP is already actively blocked</td></tr>
+        <tr><td>401</td><td>-</td><td>Missing or invalid API Key</td></tr>
+        <tr><td>403</td><td>-</td><td>Insufficient API Key scope</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>5. EDL Export (Hardware Firewall Integration)</strong></div>
+  <div class="card-body">
+    <p>BeakMeshWall automatically exports plain-text files whenever the blocklist or whitelist changes:</p>
+    <table class="table table-sm table-bordered">
+      <thead><tr><th>File</th><th>Content</th><th>Use Case</th></tr></thead>
+      <tbody>
+        <tr><td><code>blocklist.txt</code></td><td>Currently active blocked IPs, one per line</td><td>Palo Alto EDL / Fortinet External Connector</td></tr>
+        <tr><td><code>whitelist.txt</code></td><td>Whitelisted IPs/CIDRs, one per line</td><td>Firewall allow lists</td></tr>
+      </tbody>
+    </table>
+    <p>Export path is configurable via the <code>BMW_EDL_EXPORT_DIR</code> environment variable.</p>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}

@@ -1,10 +1,17 @@
+import ipaddress
 import json
+from datetime import datetime, timedelta, timezone
+
 from flask import request, jsonify
 from flask_login import login_required, current_user
+
 from app.api import api_bp
 from app.extensions import db
 from app.models.node import Node
 from app.models.task import Task
+from app.models.threat_block import ThreatBlock
+from app.models.threat_whitelist import ThreatWhitelist
+from app.services.edl_export import export_blocklist, export_whitelist
 
 
 @api_bp.route("/rules/block", methods=["POST"])
@@ -163,3 +170,201 @@ def get_task_status(task_id):
         "status": task.status,
         "result": task.result,
     })
+
+
+# ---------------------------------------------------------------------------
+# Web UI threat operations (session auth)
+# ---------------------------------------------------------------------------
+
+def _validate_ip(ip_str):
+    try:
+        ipaddress.ip_address(ip_str)
+        return True
+    except (ValueError, TypeError):
+        pass
+    try:
+        ipaddress.ip_network(ip_str, strict=False)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def _check_whitelist(ip_str):
+    try:
+        target = ipaddress.ip_address(ip_str)
+    except ValueError:
+        try:
+            target = ipaddress.ip_network(ip_str, strict=False)
+        except ValueError:
+            return None
+    for entry in ThreatWhitelist.query.all():
+        try:
+            network = ipaddress.ip_network(entry.ip_cidr, strict=False)
+        except ValueError:
+            continue
+        if isinstance(target, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+            if target in network:
+                return entry
+        else:
+            if target.overlaps(network):
+                return entry
+    return None
+
+
+@api_bp.route("/web/threat/block", methods=["POST"])
+@login_required
+def web_threat_block():
+    """Block IP from Web UI. Creates ThreatBlock record + tasks."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    ip = data.get("ip", "").strip()
+    if not ip or not _validate_ip(ip):
+        return jsonify({"error": "Invalid IP address."}), 400
+
+    wl = _check_whitelist(ip)
+    if wl:
+        return jsonify({
+            "error": f"IP is whitelisted ({wl.ip_cidr}: {wl.description})"
+        }), 409
+
+    existing = ThreatBlock.query.filter_by(ip_address=ip, status="active").first()
+    if existing:
+        return jsonify({"error": "IP already blocked.", "block_id": existing.id}), 409
+
+    reason = data.get("reason", "manual")
+    comment = data.get("comment", "")
+    duration = data.get("duration")
+    node_ids = data.get("node_ids")  # null = all online nodes
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=duration) if duration else None
+    created_by = f"web:{current_user.username}"
+
+    block = ThreatBlock(
+        ip_address=ip,
+        source="manual",
+        reason=reason,
+        detail=comment,
+        duration=duration,
+        status="active",
+        created_by=created_by,
+        created_at=now,
+        expires_at=expires_at,
+    )
+    db.session.add(block)
+
+    nft_comment = f"[manual] {reason}" if reason else "[manual]"
+    if comment:
+        nft_comment += f" - {comment}"
+    payload = {"ip": ip, "comment": nft_comment}
+
+    tasks = []
+    if node_ids:
+        for nid in node_ids:
+            node = db.session.get(Node, nid)
+            if node:
+                t = Task(node_id=node.id, action="block_ip",
+                         payload=json.dumps(payload), created_by=created_by)
+                db.session.add(t)
+                tasks.append(t)
+    else:
+        for node in Node.query.filter_by(status="online").all():
+            t = Task(node_id=node.id, action="block_ip",
+                     payload=json.dumps(payload), created_by=created_by)
+            db.session.add(t)
+            tasks.append(t)
+
+    db.session.commit()
+    export_blocklist()
+    return jsonify({
+        "status": "accepted",
+        "block_id": block.id,
+        "tasks_created": len(tasks),
+        "task_ids": [t.id for t in tasks],
+    }), 201
+
+
+@api_bp.route("/web/threat/unblock", methods=["POST"])
+@login_required
+def web_threat_unblock():
+    """Unblock IP from Web UI."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    ip = data.get("ip", "").strip()
+    if not ip or not _validate_ip(ip):
+        return jsonify({"error": "Invalid IP address."}), 400
+
+    now = datetime.now(timezone.utc)
+    created_by = f"web:{current_user.username}"
+
+    active = ThreatBlock.query.filter_by(ip_address=ip, status="active").all()
+    for b in active:
+        b.status = "removed"
+        b.removed_at = now
+        b.removed_by = created_by
+
+    payload = {"ip": ip}
+    tasks = []
+    for node in Node.query.filter_by(status="online").all():
+        t = Task(node_id=node.id, action="unblock_ip",
+                 payload=json.dumps(payload), created_by=created_by)
+        db.session.add(t)
+        tasks.append(t)
+
+    db.session.commit()
+    export_blocklist()
+    return jsonify({
+        "status": "accepted",
+        "blocks_removed": len(active),
+        "tasks_created": len(tasks),
+    }), 200
+
+
+@api_bp.route("/web/threat/whitelist", methods=["POST"])
+@login_required
+def web_whitelist_add():
+    """Add whitelist entry from Web UI."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    ip_cidr = data.get("ip_cidr", "").strip()
+    if not ip_cidr or not _validate_ip(ip_cidr):
+        return jsonify({"error": "Invalid IP or CIDR."}), 400
+
+    try:
+        net = ipaddress.ip_network(ip_cidr, strict=False)
+        ip_cidr = str(net)
+    except ValueError:
+        pass
+
+    if ThreatWhitelist.query.filter_by(ip_cidr=ip_cidr).first():
+        return jsonify({"error": f"'{ip_cidr}' already in whitelist."}), 409
+
+    entry = ThreatWhitelist(
+        ip_cidr=ip_cidr,
+        description=data.get("description", ""),
+        created_by=current_user.username,
+    )
+    db.session.add(entry)
+    db.session.commit()
+    export_whitelist()
+    return jsonify({"status": "created", "id": entry.id, "ip_cidr": entry.ip_cidr}), 201
+
+
+@api_bp.route("/web/threat/whitelist/<int:entry_id>", methods=["DELETE"])
+@login_required
+def web_whitelist_delete(entry_id):
+    """Remove whitelist entry from Web UI."""
+    entry = db.session.get(ThreatWhitelist, entry_id)
+    if not entry:
+        return jsonify({"error": "not found"}), 404
+    ip_cidr = entry.ip_cidr
+    db.session.delete(entry)
+    db.session.commit()
+    export_whitelist()
+    return jsonify({"status": "deleted", "ip_cidr": ip_cidr})

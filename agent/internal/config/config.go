@@ -34,6 +34,7 @@ type ModulesConfig struct {
 	Firewall bool `yaml:"firewall"`
 	Nginx    bool `yaml:"nginx"`
 	Service  bool `yaml:"service"`
+	Sysinfo  bool `yaml:"sysinfo"`
 }
 
 type NginxConfig struct {
@@ -58,6 +59,7 @@ func Load(path string) (*Config, error) {
 			Firewall: true,
 			Nginx:    true,
 			Service:  true,
+			Sysinfo:  true,
 		},
 		Nginx: NginxConfig{
 			ConfigPath: "/etc/nginx/sites-enabled",

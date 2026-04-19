@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}Threat Control - BeakMeshWall{% endblock %}
+{% block content %}
+<div x-data="threatControl()">
+  <h4>Threat Control</h4>
+
+  <!-- Tabs -->
+  <ul class="nav nav-tabs mt-3">
+    <li class="nav-item">
+      <a class="nav-link" :class="tab === 'blocks' && 'active'" href="#" @click.prevent="tab='blocks'">
+        Active Blocks <span class="badge bg-danger ms-1">{{ active_blocks|length }}</span>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" :class="tab === 'whitelist' && 'active'" href="#" @click.prevent="tab='whitelist'">
+        Whitelist <span class="badge bg-success ms-1">{{ whitelist|length }}</span>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" :class="tab === 'history' && 'active'" href="#" @click.prevent="tab='history'">History</a>
+    </li>
+  </ul>
+
+  <!-- Status message -->
+  <div class="mt-2" x-show="msg" x-text="msg" :class="msgOk ? 'text-success' : 'text-danger'" style="font-size:0.85rem;"></div>
+
+  <!-- ================================================================== -->
+  <!-- Tab: Active Blocks                                                  -->
+  <!-- ================================================================== -->
+  <div x-show="tab === 'blocks'" class="mt-3">
+    <!-- Block form -->
+    <div class="card mb-3">
+      <div class="card-header"><strong>Block IP</strong></div>
+      <div class="card-body">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label" style="font-size:0.85rem;">IP / CIDR</label>
+            <input type="text" class="form-control form-control-sm" x-model="blockIp" placeholder="203.0.113.50" :disabled="busy">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" style="font-size:0.85rem;">Reason</label>
+            <input type="text" class="form-control form-control-sm" x-model="blockReason" placeholder="brute_force" :disabled="busy">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" style="font-size:0.85rem;">Comment</label>
+            <input type="text" class="form-control form-control-sm" x-model="blockComment" placeholder="optional" :disabled="busy">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" style="font-size:0.85rem;">Duration (sec)</label>
+            <input type="number" class="form-control form-control-sm" x-model.number="blockDuration" placeholder="permanent" :disabled="busy">
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-sm btn-danger w-100" @click="doBlock()" :disabled="!blockIp.trim() || busy">
+              <span x-show="!busy">Block</span>
+              <span x-show="busy" class="spinner-border spinner-border-sm"></span>
+            </button>
+          </div>
+        </div>
+        <div class="mt-2" style="font-size:0.8rem; color:#6c757d;">
+          Target: All online nodes (broadcast)
+        </div>
+      </div>
+    </div>
+
+    <!-- Active blocks table -->
+    <div class="card">
+      <div class="card-header"><strong>Currently Blocked</strong></div>
+      <div class="card-body p-0">
+        {% if active_blocks %}
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr>
+              <th style="cursor:pointer" @click="sortBlocks('ip_address')">IP</th>
+              <th>Source</th>
+              <th>Reason</th>
+              <th>Detail</th>
+              <th style="cursor:pointer" @click="sortBlocks('created_at')">Blocked At</th>
+              <th>Expires</th>
+              <th>By</th>
+              <th style="width:80px">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in active_blocks %}
+            <tr>
+              <td><code>{{ b.ip_address }}</code></td>
+              <td>{{ b.source }}</td>
+              <td>{{ b.reason }}</td>
+              <td style="font-size:0.8rem;">{{ b.detail }}</td>
+              <td>{{ b.created_at.strftime('%m-%d %H:%M') if b.created_at else '-' }}</td>
+              <td>{{ b.expires_at.strftime('%m-%d %H:%M') if b.expires_at else 'permanent' }}</td>
+              <td>{{ b.created_by }}</td>
+              <td>
+                <button class="btn btn-sm btn-outline-success py-0 px-2"
+                        @click="doUnblock('{{ b.ip_address }}')" :disabled="busy">Unblock</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="p-3 text-muted">No active blocks.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Past blocks -->
+    {% if past_blocks %}
+    <div class="card mt-3">
+      <div class="card-header"><strong>Recent Removed / Expired</strong></div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0" style="font-size:0.85rem;">
+          <thead>
+            <tr><th>IP</th><th>Source</th><th>Reason</th><th>Blocked At</th><th>Status</th><th>Removed At</th><th>Removed By</th></tr>
+          </thead>
+          <tbody>
+            {% for b in past_blocks %}
+            <tr class="text-muted">
+              <td><code>{{ b.ip_address }}</code></td>
+              <td>{{ b.source }}</td>
+              <td>{{ b.reason }}</td>
+              <td>{{ b.created_at.strftime('%m-%d %H:%M') if b.created_at else '-' }}</td>
+              <td>
+                {% if b.status == 'removed' %}<span class="badge bg-secondary">removed</span>
+                {% else %}<span class="badge bg-warning text-dark">expired</span>{% endif %}
+              </td>
+              <td>{{ b.removed_at.strftime('%m-%d %H:%M') if b.removed_at else '-' }}</td>
+              <td>{{ b.removed_by or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- Tab: Whitelist                                                      -->
+  <!-- ================================================================== -->
+  <div x-show="tab === 'whitelist'" class="mt-3">
+    <!-- Add form -->
+    <div class="card mb-3">
+      <div class="card-header"><strong>Add to Whitelist</strong></div>
+      <div class="card-body">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label" style="font-size:0.85rem;">IP / CIDR</label>
+            <input type="text" class="form-control form-control-sm" x-model="wlIp" placeholder="192.168.0.0/24" :disabled="busy">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label" style="font-size:0.85rem;">Description</label>
+            <input type="text" class="form-control form-control-sm" x-model="wlDesc" placeholder="VPN Gateway" :disabled="busy">
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-sm btn-success w-100" @click="doWhitelistAdd()" :disabled="!wlIp.trim() || busy">
+              <span x-show="!busy">Add to Whitelist</span>
+              <span x-show="busy" class="spinner-border spinner-border-sm"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Whitelist table -->
+    <div class="card">
+      <div class="card-header"><strong>Whitelist Entries</strong></div>
+      <div class="card-body p-0">
+        {% if whitelist %}
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr><th>ID</th><th>IP / CIDR</th><th>Description</th><th>Created By</th><th>Created At</th><th style="width:80px">Action</th></tr>
+          </thead>
+          <tbody>
+            {% for e in whitelist %}
+            <tr>
+              <td>{{ e.id }}</td>
+              <td><code>{{ e.ip_cidr }}</code></td>
+              <td>{{ e.description }}</td>
+              <td>{{ e.created_by }}</td>
+              <td>{{ e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '-' }}</td>
+              <td>
+                <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                        @click="doWhitelistRemove({{ e.id }}, '{{ e.ip_cidr }}')" :disabled="busy">Remove</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="p-3 text-muted">Whitelist is empty.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- Tab: History                                                        -->
+  <!-- ================================================================== -->
+  <div x-show="tab === 'history'" class="mt-3">
+    <div class="card">
+      <div class="card-header"><strong>Recent Threat Tasks</strong></div>
+      <div class="card-body p-0">
+        {% if history %}
+        <table class="table table-sm mb-0" style="font-size:0.85rem;">
+          <thead>
+            <tr><th>ID</th><th>Action</th><th>IP</th><th>Node</th><th>Status</th><th>Created</th><th>By</th></tr>
+          </thead>
+          <tbody>
+            {% for t in history %}
+            <tr>
+              <td>{{ t.id }}</td>
+              <td>
+                {% if t.action == 'block_ip' %}<span class="badge bg-danger">block</span>
+                {% else %}<span class="badge bg-success">unblock</span>{% endif %}
+              </td>
+              <td><code>{{ t.payload | parse_ip }}</code></td>
+              <td>{{ t.node.hostname if t.node else t.node_id }}</td>
+              <td>
+                {% if t.status == 'success' %}<span class="badge bg-success">{{ t.status }}</span>
+                {% elif t.status == 'failed' %}<span class="badge bg-danger">{{ t.status }}</span>
+                {% elif t.status == 'sent' %}<span class="badge bg-info">{{ t.status }}</span>
+                {% else %}<span class="badge bg-warning text-dark">{{ t.status }}</span>{% endif %}
+              </td>
+              <td>{{ t.created_at.strftime('%m-%d %H:%M:%S') if t.created_at else '-' }}</td>
+              <td>{{ t.created_by or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="p-3 text-muted">No threat-related tasks yet.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function threatControl() {
+  return {
+    tab: 'blocks',
+    busy: false,
+    msg: '', msgOk: false,
+
+    // Block form
+    blockIp: '', blockReason: '', blockComment: '', blockDuration: null,
+
+    // Whitelist form
+    wlIp: '', wlDesc: '',
+
+    async doBlock() {
+      this.busy = true; this.msg = '';
+      const body = { ip: this.blockIp, reason: this.blockReason, comment: this.blockComment };
+      if (this.blockDuration) body.duration = parseInt(this.blockDuration);
+      try {
+        const r = await fetch('/api/v1/web/threat/block', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (!r.ok) { this.msg = d.error || 'Failed'; this.msgOk = false; this.busy = false; return; }
+        this.msg = 'Blocked. ' + d.tasks_created + ' task(s) dispatched.';
+        this.msgOk = true;
+        this.blockIp = ''; this.blockReason = ''; this.blockComment = ''; this.blockDuration = null;
+        await this.sleep(1000);
+        window.location.reload();
+      } catch(e) { this.msg = e.message; this.msgOk = false; }
+      this.busy = false;
+    },
+
+    async doUnblock(ip) {
+      this.busy = true; this.msg = '';
+      try {
+        const r = await fetch('/api/v1/web/threat/unblock', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ ip: ip })
+        });
+        const d = await r.json();
+        if (!r.ok) { this.msg = d.error || 'Failed'; this.msgOk = false; this.busy = false; return; }
+        this.msg = 'Unblocked ' + ip + '. ' + d.tasks_created + ' task(s) dispatched.';
+        this.msgOk = true;
+        await this.sleep(1000);
+        window.location.reload();
+      } catch(e) { this.msg = e.message; this.msgOk = false; }
+      this.busy = false;
+    },
+
+    async doWhitelistAdd() {
+      this.busy = true; this.msg = '';
+      try {
+        const r = await fetch('/api/v1/web/threat/whitelist', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ ip_cidr: this.wlIp, description: this.wlDesc })
+        });
+        const d = await r.json();
+        if (!r.ok) { this.msg = d.error || 'Failed'; this.msgOk = false; this.busy = false; return; }
+        this.msg = 'Added ' + d.ip_cidr + ' to whitelist.';
+        this.msgOk = true;
+        this.wlIp = ''; this.wlDesc = '';
+        await this.sleep(800);
+        window.location.reload();
+      } catch(e) { this.msg = e.message; this.msgOk = false; }
+      this.busy = false;
+    },
+
+    async doWhitelistRemove(id, ipCidr) {
+      if (!confirm('Remove ' + ipCidr + ' from whitelist?')) return;
+      this.busy = true; this.msg = '';
+      try {
+        const r = await fetch('/api/v1/web/threat/whitelist/' + id, { method: 'DELETE' });
+        const d = await r.json();
+        if (!r.ok) { this.msg = d.error || 'Failed'; this.msgOk = false; this.busy = false; return; }
+        this.msg = 'Removed ' + ipCidr + ' from whitelist.';
+        this.msgOk = true;
+        await this.sleep(800);
+        window.location.reload();
+      } catch(e) { this.msg = e.message; this.msgOk = false; }
+      this.busy = false;
+    },
+
+    sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  };
+}
+</script>
+{% endblock %}

@@ -29,4 +29,15 @@ def create_app(config_class=Config):
     from app.cli import register_cli
     register_cli(app)
 
+    # Template filters
+    import json as _json
+
+    @app.template_filter("parse_ip")
+    def parse_ip_filter(payload_str):
+        """Extract 'ip' from a JSON payload string."""
+        try:
+            return _json.loads(payload_str).get("ip", "")
+        except (ValueError, TypeError):
+            return ""
+
     return app

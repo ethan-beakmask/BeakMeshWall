@@ -20,3 +20,10 @@ class Config:
 
     # Unique cookie name to avoid collision with other Flask apps on the same domain
     SESSION_COOKIE_NAME = "bmw_session"
+
+    # EDL (External Dynamic List) export directory
+    # Hardware firewalls (Palo Alto, Fortinet, etc.) can fetch these plain-text files
+    EDL_EXPORT_DIR = os.environ.get(
+        "BMW_EDL_EXPORT_DIR",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "edl_export"),
+    )

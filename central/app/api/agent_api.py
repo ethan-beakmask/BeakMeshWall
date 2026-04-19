@@ -122,7 +122,7 @@ def agent_report(node=None):
         except (json.JSONDecodeError, TypeError):
             state = {}
 
-    for key in ("fw_state", "nginx_state", "service_state"):
+    for key in ("fw_state", "nginx_state", "service_state", "system_info"):
         if key in data:
             state[key] = data[key]
 

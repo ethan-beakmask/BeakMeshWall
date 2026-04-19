@@ -49,3 +49,6 @@ agent/test-config.yaml
 
 # Archive (old unverified code)
 _archive/
+
+# EDL export (auto-generated, environment-specific)
+edl_export/

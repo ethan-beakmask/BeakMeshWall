@@ -15,6 +15,7 @@ import (
 	"github.com/anthropics/beakmeshwall-agent/internal/module/firewall"
 	"github.com/anthropics/beakmeshwall-agent/internal/module/nginx"
 	"github.com/anthropics/beakmeshwall-agent/internal/module/service"
+	"github.com/anthropics/beakmeshwall-agent/internal/module/sysinfo"
 )
 
 const version = "0.3.0"
@@ -47,6 +48,7 @@ func main() {
 		fmt.Println("    firewall: true")
 		fmt.Println("    nginx: true")
 		fmt.Println("    service: true")
+		fmt.Println("    sysinfo: true              # user account auditing")
 		fmt.Println("  nginx:")
 		fmt.Println("    config_path: /etc/nginx/sites-enabled")
 		os.Exit(0)
@@ -110,6 +112,12 @@ func main() {
 		svcMod := service.New()
 		modules = append(modules, svcMod)
 		log.Printf("INFO: service module enabled")
+	}
+
+	if cfg.Modules.Sysinfo {
+		sysMod := sysinfo.New()
+		modules = append(modules, sysMod)
+		log.Printf("INFO: sysinfo module enabled")
 	}
 
 	if len(modules) == 0 {
@@ -194,6 +202,8 @@ func doPoll(c *client.Client, modules []module.Module, executor module.Executor)
 			reportData["nginx_state"] = state
 		case "service":
 			reportData["service_state"] = state
+		case "sysinfo":
+			reportData["system_info"] = state
 		}
 	}
 
