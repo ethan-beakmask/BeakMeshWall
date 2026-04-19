@@ -1,0 +1,522 @@
+{% extends "base.html" %}
+{% block title %}Topology Graph - BeakMeshWall{% endblock %}
+{% block content %}
+<style>
+  #cy-container {
+    width: 100%;
+    height: calc(100vh - 140px);
+    border: 1px solid #dee2e6;
+    background: #1a1a2e;
+    position: relative;
+  }
+  #cy { width: 100%; height: 100%; }
+  #legend {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(33,37,41,0.92);
+    color: #ccc;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  #legend .row-item { display: flex; align-items: center; margin-bottom: 4px; }
+  #legend .swatch {
+    width: 14px; height: 14px; border-radius: 2px; margin-right: 8px;
+    display: inline-block; border: 1px solid #555;
+  }
+  #info-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 320px;
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+    background: rgba(33,37,41,0.95);
+    color: #dee2e6;
+    border-radius: 4px;
+    font-size: 13px;
+    z-index: 10;
+    display: none;
+  }
+  #info-panel .ip-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid #495057;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #info-panel .ip-body { padding: 10px 14px; }
+  #info-panel .ip-body dt { color: #adb5bd; font-weight: normal; }
+  #info-panel .ip-body dd { color: #f8f9fa; margin-bottom: 6px; }
+  #info-panel .btn-close-panel {
+    background: none; border: none; color: #adb5bd; cursor: pointer; font-size: 16px;
+  }
+  #info-panel .btn-close-panel:hover { color: #fff; }
+  .toolbar { margin-bottom: 10px; }
+  .toolbar .badge-status { font-size: 11px; }
+</style>
+
+<div class="d-flex align-items-center toolbar">
+  <h5 class="mb-0">Request Path Topology</h5>
+  <span class="badge bg-info ms-2">MVP Demo - Mock Data</span>
+  <div class="ms-auto d-flex gap-2">
+    <select id="layout-select" class="form-select form-select-sm" style="width: 160px;">
+      <option value="preset">Layered (Preset)</option>
+      <option value="breadthfirst">Breadthfirst</option>
+    </select>
+    <button class="btn btn-sm btn-outline-secondary" onclick="fitGraph()">Fit View</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="resetView()">Reset</button>
+  </div>
+</div>
+
+<div id="cy-container">
+  <div id="cy"></div>
+  <div id="legend">
+    <div class="row-item"><span class="swatch" style="background:#e74c3c;"></span> Internet</div>
+    <div class="row-item"><span class="swatch" style="background:#e67e22;"></span> Firewall</div>
+    <div class="row-item"><span class="swatch" style="background:#2ecc71;"></span> Nginx</div>
+    <div class="row-item"><span class="swatch" style="background:#3498db;"></span> Route / Location</div>
+    <div class="row-item"><span class="swatch" style="background:#9b59b6;"></span> Upstream (LB)</div>
+    <div class="row-item"><span class="swatch" style="background:#1abc9c;"></span> Service / Process</div>
+    <div class="row-item" style="margin-top:6px; color:#777;">
+      Scroll = Zoom &nbsp; Drag = Pan &nbsp; Click = Detail
+    </div>
+  </div>
+  <div id="info-panel">
+    <div class="ip-header">
+      <strong id="ip-title">Node Detail</strong>
+      <button class="btn-close-panel" onclick="closeInfoPanel()">&times;</button>
+    </div>
+    <div class="ip-body" id="ip-body"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/cytoscape/cytoscape.min.js') }}"></script>
+<script>
+// ── Mock topology data ────────────────────────────────────────
+// Simulates a node running: nginx reverse proxy, multiple services,
+// load balancing, API route splitting, and a direct SSH service.
+
+const COLS = { inet: 80, fw: 300, nginx: 540, route: 780, upstream: 980, svc: 1200 };
+const ROW_H = 90;
+
+function mockElements() {
+  const nodes = [];
+  const edges = [];
+  let y = 60;
+
+  function n(id, label, type, col, row, extra) {
+    nodes.push({
+      data: { id, label, type, ...extra },
+      position: { x: col, y: row },
+    });
+  }
+  function e(src, tgt, label, extra) {
+    edges.push({ data: { source: src, target: tgt, label: label || '', ...extra } });
+  }
+
+  // ── Internet entry ──
+  n('inet', 'Internet', 'internet', COLS.inet, 340);
+
+  // ── Scenario 1: Port 443 → app.example.com → API routes → services ──
+  y = 60;
+  n('fw_443', ':443\nACCEPT', 'firewall', COLS.fw, y + ROW_H * 2,
+    { port: 443, action: 'accept', detail: 'tcp dport 443 accept (ip_whitelist policy)' });
+  n('ngx_app', 'app.example.com\n:443 ssl', 'nginx', COLS.nginx, y + ROW_H * 2,
+    { server_name: 'app.example.com', listen: '0.0.0.0:443 ssl', project: 'main-app' });
+
+  // API routes from nginx
+  n('rt_root', '/', 'route', COLS.route, y,
+    { path: '/', action: 'proxy_pass', target: 'http://127.0.0.1:5171' });
+  n('rt_api_users', '/api/users', 'route', COLS.route, y + ROW_H,
+    { path: '/api/users', action: 'proxy_pass', target: 'http://api_pool' });
+  n('rt_api_orders', '/api/orders', 'route', COLS.route, y + ROW_H * 2,
+    { path: '/api/orders', action: 'proxy_pass', target: 'http://api_pool' });
+  n('rt_api_auth', '/api/auth', 'route', COLS.route, y + ROW_H * 3,
+    { path: '/api/auth', action: 'proxy_pass', target: 'http://127.0.0.1:8003' });
+  n('rt_static', '/static', 'route', COLS.route, y + ROW_H * 4,
+    { path: '/static', action: 'return 304 / alias', target: '/var/www/static' });
+
+  // Upstream (load balancer)
+  n('ups_api_pool', 'upstream\napi_pool', 'upstream', COLS.upstream, y + ROW_H * 1.5,
+    { members: '3 backends', algorithm: 'round-robin' });
+
+  // Backend services
+  n('svc_web', 'web-frontend\ngunicorn :5171', 'service', COLS.svc, y,
+    { process: 'gunicorn', pid: 2041, bind: '127.0.0.1', port: 5171 });
+  n('svc_api1', 'api-worker-1\ngunicorn :9001', 'service', COLS.svc, y + ROW_H,
+    { process: 'gunicorn', pid: 3101, bind: '127.0.0.1', port: 9001 });
+  n('svc_api2', 'api-worker-2\ngunicorn :9002', 'service', COLS.svc, y + ROW_H * 2,
+    { process: 'gunicorn', pid: 3102, bind: '127.0.0.1', port: 9002 });
+  n('svc_api3', 'api-worker-3\ngunicorn :9003', 'service', COLS.svc, y + ROW_H * 3,
+    { process: 'gunicorn', pid: 3103, bind: '127.0.0.1', port: 9003 });
+  n('svc_auth', 'auth-service\njava :8003', 'service', COLS.svc, y + ROW_H * 4 - ROW_H / 2,
+    { process: 'java', pid: 4201, bind: '127.0.0.1', port: 8003 });
+
+  // Edges: scenario 1
+  e('inet', 'fw_443', 'tcp/443');
+  e('fw_443', 'ngx_app');
+  e('ngx_app', 'rt_root', '/');
+  e('ngx_app', 'rt_api_users', '/api/users');
+  e('ngx_app', 'rt_api_orders', '/api/orders');
+  e('ngx_app', 'rt_api_auth', '/api/auth');
+  e('ngx_app', 'rt_static', '/static');
+  e('rt_root', 'svc_web');
+  e('rt_api_users', 'ups_api_pool');
+  e('rt_api_orders', 'ups_api_pool');
+  e('ups_api_pool', 'svc_api1', '', { lb: true });
+  e('ups_api_pool', 'svc_api2', '', { lb: true });
+  e('ups_api_pool', 'svc_api3', '', { lb: true });
+  e('rt_api_auth', 'svc_auth');
+
+  // ── Scenario 2: Port 8443 → admin panel ──
+  y = 520;
+  n('fw_8443', ':8443\nACCEPT', 'firewall', COLS.fw, y,
+    { port: 8443, action: 'accept', detail: 'tcp dport 8443 accept' });
+  n('ngx_admin', 'admin.example.com\n:8443 ssl', 'nginx', COLS.nginx, y,
+    { server_name: 'admin.example.com', listen: '0.0.0.0:8443 ssl', project: 'admin' });
+  n('rt_admin_root', '/', 'route', COLS.route, y,
+    { path: '/', action: 'proxy_pass', target: 'http://127.0.0.1:5180' });
+  n('svc_admin', 'admin-panel\ngunicorn :5180', 'service', COLS.svc, y,
+    { process: 'gunicorn', pid: 5010, bind: '127.0.0.1', port: 5180 });
+
+  e('inet', 'fw_8443', 'tcp/8443');
+  e('fw_8443', 'ngx_admin');
+  e('ngx_admin', 'rt_admin_root', '/');
+  e('rt_admin_root', 'svc_admin');
+
+  // ── Scenario 3: Port 80 → redirect to HTTPS ──
+  y = 630;
+  n('fw_80', ':80\nACCEPT', 'firewall', COLS.fw, y,
+    { port: 80, action: 'accept', detail: 'tcp dport 80 accept' });
+  n('ngx_redir', 'redirect\n:80', 'nginx', COLS.nginx, y,
+    { server_name: '_', listen: '0.0.0.0:80', project: 'redirect' });
+  n('rt_redir', '/ (301)', 'route', COLS.route, y,
+    { path: '/', action: 'return 301', target: 'https://$host$request_uri' });
+
+  e('inet', 'fw_80', 'tcp/80');
+  e('fw_80', 'ngx_redir');
+  e('ngx_redir', 'rt_redir', '301 redirect');
+
+  // ── Scenario 4: Port 22 → direct SSH (no nginx) ──
+  y = 740;
+  n('fw_22', ':22\nACCEPT', 'firewall', COLS.fw, y,
+    { port: 22, action: 'accept', detail: 'tcp dport 22 accept (source restricted)' });
+  n('svc_ssh', 'sshd\n:22', 'service', COLS.svc - 250, y,
+    { process: 'sshd', pid: 891, bind: '0.0.0.0', port: 22, direct: true });
+
+  e('inet', 'fw_22', 'tcp/22');
+  e('fw_22', 'svc_ssh', 'direct (no proxy)', { direct: true });
+
+  // ── Scenario 5: Firewall DROP (port scan noise) ──
+  y = 840;
+  n('fw_drop', ':*\nDROP', 'firewall_drop', COLS.fw, y,
+    { port: '*', action: 'drop', detail: 'default policy: drop all unmatched' });
+
+  e('inet', 'fw_drop', 'other', { dropped: true });
+
+  return { nodes, edges };
+}
+
+// ── Cytoscape init ────────────────────────────────────────────
+
+const { nodes, edges } = mockElements();
+
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements: { nodes, edges },
+  minZoom: 0.2,
+  maxZoom: 4,
+  userPanningEnabled: true,
+  userZoomingEnabled: true,
+  boxSelectionEnabled: false,
+  layout: { name: 'preset' },
+  style: [
+    // ── Internet ──
+    {
+      selector: 'node[type="internet"]',
+      style: {
+        'shape': 'diamond',
+        'background-color': '#e74c3c',
+        'label': 'data(label)',
+        'color': '#fff',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '11px',
+        'text-wrap': 'wrap',
+        'width': 70, 'height': 70,
+        'border-width': 2,
+        'border-color': '#c0392b',
+      }
+    },
+    // ── Firewall ACCEPT ──
+    {
+      selector: 'node[type="firewall"]',
+      style: {
+        'shape': 'hexagon',
+        'background-color': '#e67e22',
+        'label': 'data(label)',
+        'color': '#fff',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'text-wrap': 'wrap',
+        'width': 80, 'height': 60,
+        'border-width': 2,
+        'border-color': '#d35400',
+      }
+    },
+    // ── Firewall DROP ──
+    {
+      selector: 'node[type="firewall_drop"]',
+      style: {
+        'shape': 'hexagon',
+        'background-color': '#7f8c8d',
+        'label': 'data(label)',
+        'color': '#ecf0f1',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'text-wrap': 'wrap',
+        'width': 80, 'height': 60,
+        'border-width': 2,
+        'border-color': '#636e72',
+        'border-style': 'dashed',
+      }
+    },
+    // ── Nginx ──
+    {
+      selector: 'node[type="nginx"]',
+      style: {
+        'shape': 'round-rectangle',
+        'background-color': '#2ecc71',
+        'label': 'data(label)',
+        'color': '#fff',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'text-wrap': 'wrap',
+        'width': 130, 'height': 50,
+        'border-width': 2,
+        'border-color': '#27ae60',
+      }
+    },
+    // ── Route / Location ──
+    {
+      selector: 'node[type="route"]',
+      style: {
+        'shape': 'round-rectangle',
+        'background-color': '#3498db',
+        'label': 'data(label)',
+        'color': '#fff',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'text-wrap': 'wrap',
+        'width': 110, 'height': 36,
+        'border-width': 1,
+        'border-color': '#2980b9',
+      }
+    },
+    // ── Upstream (LB) ──
+    {
+      selector: 'node[type="upstream"]',
+      style: {
+        'shape': 'barrel',
+        'background-color': '#9b59b6',
+        'label': 'data(label)',
+        'color': '#fff',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'text-wrap': 'wrap',
+        'width': 100, 'height': 55,
+        'border-width': 2,
+        'border-color': '#8e44ad',
+      }
+    },
+    // ── Service / Process ──
+    {
+      selector: 'node[type="service"]',
+      style: {
+        'shape': 'ellipse',
+        'background-color': '#1abc9c',
+        'label': 'data(label)',
+        'color': '#fff',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'text-wrap': 'wrap',
+        'width': 120, 'height': 50,
+        'border-width': 2,
+        'border-color': '#16a085',
+      }
+    },
+    // ── Node hover ──
+    {
+      selector: 'node:active',
+      style: { 'overlay-opacity': 0.15, 'overlay-color': '#fff' }
+    },
+    {
+      selector: 'node:selected',
+      style: {
+        'border-width': 3,
+        'border-color': '#f1c40f',
+      }
+    },
+    // ── Default edges ──
+    {
+      selector: 'edge',
+      style: {
+        'width': 2,
+        'line-color': '#7f8c8d',
+        'target-arrow-color': '#7f8c8d',
+        'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier',
+        'label': 'data(label)',
+        'font-size': '9px',
+        'color': '#bdc3c7',
+        'text-background-color': '#1a1a2e',
+        'text-background-opacity': 0.8,
+        'text-background-padding': '2px',
+        'arrow-scale': 0.8,
+      }
+    },
+    // ── LB fan-out edges ──
+    {
+      selector: 'edge[?lb]',
+      style: {
+        'line-color': '#9b59b6',
+        'target-arrow-color': '#9b59b6',
+        'line-style': 'dashed',
+        'width': 1.5,
+      }
+    },
+    // ── Direct connection (bypass nginx) ──
+    {
+      selector: 'edge[?direct]',
+      style: {
+        'line-color': '#e74c3c',
+        'target-arrow-color': '#e74c3c',
+        'line-style': 'dashed',
+        'width': 2,
+      }
+    },
+    // ── Dropped traffic ──
+    {
+      selector: 'edge[?dropped]',
+      style: {
+        'line-color': '#636e72',
+        'target-arrow-color': '#636e72',
+        'line-style': 'dotted',
+        'width': 1,
+        'target-arrow-shape': 'tee',
+      }
+    },
+  ],
+});
+
+cy.fit(null, 40);
+
+// ── Layout switching ──────────────────────────────────────────
+
+document.getElementById('layout-select').addEventListener('change', function() {
+  const name = this.value;
+  if (name === 'preset') {
+    // Restore original positions
+    const { nodes: origNodes } = mockElements();
+    origNodes.forEach(nd => {
+      const ele = cy.getElementById(nd.data.id);
+      if (ele.length) ele.position(nd.position);
+    });
+    cy.fit(null, 40);
+  } else if (name === 'breadthfirst') {
+    cy.layout({
+      name: 'breadthfirst',
+      directed: true,
+      roots: '#inet',
+      spacingFactor: 1.2,
+      animate: true,
+      animationDuration: 400,
+    }).run();
+  }
+});
+
+function fitGraph() { cy.fit(null, 40); }
+function resetView() {
+  document.getElementById('layout-select').value = 'preset';
+  const { nodes: origNodes } = mockElements();
+  origNodes.forEach(nd => {
+    const ele = cy.getElementById(nd.data.id);
+    if (ele.length) ele.position(nd.position);
+  });
+  cy.fit(null, 40);
+}
+
+// ── Info panel on node click ──────────────────────────────────
+
+function closeInfoPanel() {
+  document.getElementById('info-panel').style.display = 'none';
+}
+
+cy.on('tap', 'node', function(evt) {
+  const d = evt.target.data();
+  const panel = document.getElementById('info-panel');
+  const title = document.getElementById('ip-title');
+  const body = document.getElementById('ip-body');
+
+  title.textContent = d.label.replace(/\n/g, ' ');
+
+  let html = '<dl>';
+  html += `<dt>Type</dt><dd>${d.type}</dd>`;
+
+  if (d.type === 'firewall' || d.type === 'firewall_drop') {
+    html += `<dt>Port</dt><dd>${d.port}</dd>`;
+    html += `<dt>Action</dt><dd>${d.action.toUpperCase()}</dd>`;
+    html += `<dt>Rule</dt><dd>${d.detail}</dd>`;
+  }
+  if (d.type === 'nginx') {
+    html += `<dt>Server Name</dt><dd>${d.server_name}</dd>`;
+    html += `<dt>Listen</dt><dd>${d.listen}</dd>`;
+    html += `<dt>Project</dt><dd>${d.project}</dd>`;
+  }
+  if (d.type === 'route') {
+    html += `<dt>Path</dt><dd><code>${d.path}</code></dd>`;
+    html += `<dt>Action</dt><dd>${d.action}</dd>`;
+    html += `<dt>Target</dt><dd>${d.target}</dd>`;
+  }
+  if (d.type === 'upstream') {
+    html += `<dt>Members</dt><dd>${d.members}</dd>`;
+    html += `<dt>Algorithm</dt><dd>${d.algorithm}</dd>`;
+  }
+  if (d.type === 'service') {
+    html += `<dt>Process</dt><dd>${d.process}</dd>`;
+    html += `<dt>PID</dt><dd>${d.pid}</dd>`;
+    html += `<dt>Bind</dt><dd>${d.bind}:${d.port}</dd>`;
+    if (d.direct) html += `<dt>Note</dt><dd style="color:#e74c3c;">Direct exposure (no reverse proxy)</dd>`;
+  }
+  html += '</dl>';
+
+  // Show connected edges summary
+  const inEdges = evt.target.incomers('edge');
+  const outEdges = evt.target.outgoers('edge');
+  if (inEdges.length || outEdges.length) {
+    html += '<hr style="border-color:#495057;">';
+    html += `<dt style="color:#adb5bd;">Inbound</dt><dd>${inEdges.length} connection(s)</dd>`;
+    html += `<dt style="color:#adb5bd;">Outbound</dt><dd>${outEdges.length} connection(s)</dd>`;
+  }
+
+  body.innerHTML = html;
+  panel.style.display = 'block';
+});
+
+cy.on('tap', function(evt) {
+  if (evt.target === cy) closeInfoPanel();
+});
+</script>
+{% endblock %}
