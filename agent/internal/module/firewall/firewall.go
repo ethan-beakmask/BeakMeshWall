@@ -1,33 +1,15 @@
-// Package firewall wraps the existing driver as a module.
+// Package firewall wraps the OS-specific driver as a module.
 package firewall
 
 import (
 	"fmt"
 
 	"github.com/anthropics/beakmeshwall-agent/internal/driver"
-	"github.com/anthropics/beakmeshwall-agent/internal/driver/nftables"
 )
 
 // Module implements module.Module and module.Executor for firewall management.
 type Module struct {
 	drv driver.Driver
-}
-
-// New creates a firewall module with the specified driver.
-func New(driverName, tableName string) (*Module, error) {
-	var drv driver.Driver
-	switch driverName {
-	case "nftables", "":
-		drv = nftables.New(tableName)
-	default:
-		return nil, fmt.Errorf("unsupported firewall driver: %s", driverName)
-	}
-
-	if err := drv.Init(); err != nil {
-		return nil, fmt.Errorf("init firewall driver: %w", err)
-	}
-
-	return &Module{drv: drv}, nil
 }
 
 func (m *Module) Name() string {

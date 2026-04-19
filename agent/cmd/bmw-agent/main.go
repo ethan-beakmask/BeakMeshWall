@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
+	"runtime"
 	"time"
 
 	"github.com/anthropics/beakmeshwall-agent/internal/client"
@@ -18,7 +17,7 @@ import (
 	"github.com/anthropics/beakmeshwall-agent/internal/module/service"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	configPath := flag.String("config", "", "Path to agent config file (YAML)")
@@ -42,8 +41,8 @@ func main() {
 		fmt.Println("    hostname: my-server")
 		fmt.Println("    poll_interval: 30")
 		fmt.Println("  firewall:")
-		fmt.Println("    driver: nftables")
-		fmt.Println("    table: inet beakmeshwall")
+		fmt.Println("    driver: nftables            # or windows_firewall")
+		fmt.Println("    table: inet beakmeshwall    # linux only")
 		fmt.Println("  modules:")
 		fmt.Println("    firewall: true")
 		fmt.Println("    nginx: true")
@@ -54,7 +53,7 @@ func main() {
 	}
 
 	if *showVersion {
-		fmt.Printf("bmw-agent %s\n", version)
+		fmt.Printf("bmw-agent %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}
 
@@ -74,10 +73,14 @@ func main() {
 
 	c := client.New(cfg.Central.URL, cfg.Central.Token)
 
+	// Registration mode: output to console, then exit
 	if *register {
 		doRegister(c, cfg, hostname)
 		return
 	}
+
+	// Daemon mode: redirect log on Windows
+	initPlatform()
 
 	if cfg.Central.Token == "" {
 		log.Fatal("ERROR: central.token is required. Run with -register first.")
@@ -94,7 +97,7 @@ func main() {
 		}
 		modules = append(modules, fwMod)
 		executor = fwMod
-		log.Printf("INFO: firewall module enabled (driver: %s, table: %s)", cfg.Firewall.Driver, cfg.Firewall.Table)
+		log.Printf("INFO: firewall module enabled (driver: %s)", cfg.Firewall.Driver)
 	}
 
 	if cfg.Modules.Nginx {
@@ -113,14 +116,22 @@ func main() {
 		log.Fatal("ERROR: no modules enabled")
 	}
 
-	log.Printf("INFO: agent started (%d modules), polling %s every %ds", len(modules), cfg.Central.URL, cfg.Agent.PollInterval)
-	runPollLoop(c, modules, executor, cfg.Agent.PollInterval)
+	log.Printf("INFO: agent %s started (%d modules), polling %s every %ds",
+		version, len(modules), cfg.Central.URL, cfg.Agent.PollInterval)
+
+	done := make(chan struct{})
+	go runPollLoop(c, modules, executor, cfg.Agent.PollInterval, done)
+
+	// Block until shutdown (Linux: signal, Windows: tray quit)
+	waitForShutdown(len(modules), cfg.Agent.PollInterval)
+	close(done)
+	log.Println("INFO: agent stopped")
 }
 
 func doRegister(c *client.Client, cfg *config.Config, hostname string) {
 	resp, err := c.Register(client.RegisterRequest{
 		Hostname:     hostname,
-		OSType:       "linux",
+		OSType:       runtime.GOOS,
 		FWDriver:     cfg.Firewall.Driver,
 		AgentVersion: version,
 	})
@@ -128,15 +139,12 @@ func doRegister(c *client.Client, cfg *config.Config, hostname string) {
 		log.Fatalf("ERROR: registration failed: %v", err)
 	}
 
-	log.Printf("INFO: registered as node %d", resp.NodeID)
-	log.Printf("INFO: token: %s", resp.Token)
-	log.Printf("INFO: add this token to your config file under central.token")
+	fmt.Printf("Registered as node %d\n", resp.NodeID)
+	fmt.Printf("Token: %s\n", resp.Token)
+	fmt.Printf("Add this token to your config file under central.token\n")
 }
 
-func runPollLoop(c *client.Client, modules []module.Module, executor module.Executor, intervalSec int) {
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-
+func runPollLoop(c *client.Client, modules []module.Module, executor module.Executor, intervalSec int, done <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
 	defer ticker.Stop()
 
@@ -146,8 +154,7 @@ func runPollLoop(c *client.Client, modules []module.Module, executor module.Exec
 		select {
 		case <-ticker.C:
 			doPoll(c, modules, executor)
-		case s := <-sig:
-			log.Printf("INFO: received %v, shutting down", s)
+		case <-done:
 			return
 		}
 	}

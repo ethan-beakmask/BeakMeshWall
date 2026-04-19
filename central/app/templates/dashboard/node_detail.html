@@ -83,7 +83,7 @@
       {% if chain.rules %}
       <table class="table table-sm table-bordered mb-0">
         <thead>
-          <tr><th style="width:60px">Handle</th><th>Expression</th><th style="width:100px">Comment</th><th style="width:80px">Action</th></tr>
+          <tr><th style="width:40px">Handle</th><th style="width:15%">Expression</th><th>Comment</th><th style="width:50px">Action</th></tr>
         </thead>
         <tbody>
           {% for rule in chain.rules %}
@@ -125,12 +125,17 @@
         </div>
         <div x-show="expanded" x-transition style="background: #fafafa;">
           {% for chain in tbl.chains %}
-          <div class="ps-4 py-1 border-bottom" style="font-size: 0.85rem;">
-            <strong>{{ chain.name }}</strong>
-            {% if chain.type %}<span class="text-muted"> ({{ chain.type }}/{{ chain.hook }}, policy {{ chain.policy }})</span>{% endif %}
+          <div x-data="{ chainOpen: false }" class="ps-4 py-1 border-bottom" style="font-size: 0.85rem;">
+            <div style="cursor:pointer" @click="chainOpen = !chainOpen" class="d-flex align-items-center">
+              <span x-text="chainOpen ? '&#9660;' : '&#9654;'" class="me-2" style="font-size:0.65rem"></span>
+              <strong>{{ chain.name }}</strong>
+              {% if chain.policy %}<span class="text-muted ms-2">({{ chain.policy }})</span>{% endif %}
+              {% if chain.rules %}<span class="badge bg-secondary ms-2">{{ chain.rules|length }}</span>{% endif %}
+            </div>
+            <div x-show="chainOpen" x-transition>
             {% if chain.rules %}
             <table class="table table-sm mb-0 mt-1" style="font-size: 0.8rem;">
-              <thead><tr><th style="width:50px">Handle</th><th>Expression</th><th style="width:80px">Comment</th></tr></thead>
+              <thead><tr><th style="width:40px">Handle</th><th style="width:15%">Expression</th><th>Comment</th></tr></thead>
               <tbody>
                 {% for rule in chain.rules %}
                 <tr>
@@ -144,6 +149,7 @@
             {% else %}
             <div class="text-muted">(no rules)</div>
             {% endif %}
+            </div>
           </div>
           {% endfor %}
         </div>

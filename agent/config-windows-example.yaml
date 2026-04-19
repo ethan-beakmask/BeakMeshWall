@@ -1,0 +1,29 @@
+# BeakMeshWall Agent - Windows Configuration Example
+#
+# 1. Copy bmw-agent.exe and this file to the target Windows machine.
+# 2. Edit this file: set central.url and agent.hostname.
+# 3. Register (run as Administrator):
+#      bmw-agent.exe -config config.yaml -register
+# 4. Copy the returned token into central.token below.
+# 5. Run the agent (as Administrator):
+#      bmw-agent.exe -config config.yaml
+
+central:
+  url: http://CENTRAL_IP:5100
+  token: ""                  # Paste token from registration
+
+agent:
+  hostname: ""               # Leave empty to auto-detect
+  poll_interval: 30          # Seconds between polls
+
+firewall:
+  driver: windows_firewall
+  table: ""                  # Not used on Windows
+
+modules:
+  firewall: true
+  nginx: false               # Not applicable on Windows
+  service: true
+
+nginx:
+  config_path: ""            # Not applicable on Windows
