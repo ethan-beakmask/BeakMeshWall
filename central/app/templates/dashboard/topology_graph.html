@@ -4,7 +4,7 @@
 <style>
   #cy-container {
     width: 100%;
-    height: calc(100vh - 140px);
+    height: calc(100vh - 160px);
     border: 1px solid #dee2e6;
     background: #1a1a2e;
     position: relative;
@@ -31,7 +31,7 @@
     position: absolute;
     top: 12px;
     right: 12px;
-    width: 320px;
+    width: 340px;
     max-height: calc(100% - 24px);
     overflow-y: auto;
     background: rgba(33,37,41,0.95);
@@ -50,37 +50,70 @@
   }
   #info-panel .ip-body { padding: 10px 14px; }
   #info-panel .ip-body dt { color: #adb5bd; font-weight: normal; }
-  #info-panel .ip-body dd { color: #f8f9fa; margin-bottom: 6px; }
+  #info-panel .ip-body dd { color: #f8f9fa; margin-bottom: 6px; word-break: break-all; }
   #info-panel .btn-close-panel {
     background: none; border: none; color: #adb5bd; cursor: pointer; font-size: 16px;
   }
   #info-panel .btn-close-panel:hover { color: #fff; }
   .toolbar { margin-bottom: 10px; }
-  .toolbar .badge-status { font-size: 11px; }
+  .status-summary .badge { font-size: 11px; margin-right: 4px; }
+  #loading-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(26,26,46,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #adb5bd;
+    font-size: 14px;
+    z-index: 20;
+  }
 </style>
 
-<div class="d-flex align-items-center toolbar">
+<div class="d-flex align-items-center flex-wrap gap-2 toolbar">
   <h5 class="mb-0">Request Path Topology</h5>
-  <span class="badge bg-info ms-2">MVP Demo - Mock Data</span>
+  <select id="node-select" class="form-select form-select-sm" style="width: 220px;">
+    <option value="">-- Select Node --</option>
+    {% for node in nodes %}
+    <option value="{{ node.id }}"
+            data-status="{{ node.status }}">
+      {{ node.hostname }} ({{ node.status }})
+    </option>
+    {% endfor %}
+  </select>
+  <div class="form-check form-check-inline ms-2 mb-0">
+    <input class="form-check-input" type="checkbox" id="show-internal">
+    <label class="form-check-label text-muted small" for="show-internal">Show internal-only services</label>
+  </div>
   <div class="ms-auto d-flex gap-2">
     <select id="layout-select" class="form-select form-select-sm" style="width: 160px;">
       <option value="preset">Layered (Preset)</option>
       <option value="breadthfirst">Breadthfirst</option>
     </select>
     <button class="btn btn-sm btn-outline-secondary" onclick="fitGraph()">Fit View</button>
-    <button class="btn btn-sm btn-outline-secondary" onclick="resetView()">Reset</button>
   </div>
 </div>
 
+<div id="status-bar" class="status-summary mb-2" style="display:none;"></div>
+
 <div id="cy-container">
   <div id="cy"></div>
+  <div id="loading-overlay" style="display:none;">Loading topology data...</div>
   <div id="legend">
     <div class="row-item"><span class="swatch" style="background:#e74c3c;"></span> Internet</div>
-    <div class="row-item"><span class="swatch" style="background:#e67e22;"></span> Firewall</div>
-    <div class="row-item"><span class="swatch" style="background:#2ecc71;"></span> Nginx</div>
-    <div class="row-item"><span class="swatch" style="background:#3498db;"></span> Route / Location</div>
-    <div class="row-item"><span class="swatch" style="background:#9b59b6;"></span> Upstream (LB)</div>
-    <div class="row-item"><span class="swatch" style="background:#1abc9c;"></span> Service / Process</div>
+    <div class="row-item"><span class="swatch" style="background:#e67e22;"></span> Firewall (ACCEPT)</div>
+    <div class="row-item"><span class="swatch" style="background:#7f8c8d;border-style:dashed;"></span> Firewall (DROP)</div>
+    <div class="row-item"><span class="swatch" style="background:#2ecc71;"></span> Nginx Proxy</div>
+    <div class="row-item"><span class="swatch" style="background:#1abc9c;"></span> Service (OK)</div>
+    <div class="row-item"><span class="swatch" style="background:#e74c3c;"></span> Service (Danger)</div>
+    <div class="row-item"><span class="swatch" style="background:#f39c12;"></span> Service (Warning)</div>
+    <div class="row-item"><span class="swatch" style="background:#636e72;"></span> Unused / Down</div>
+    <div class="row-item" style="margin-top:8px; border-top:1px solid #444; padding-top:6px; color:#999;">Lines</div>
+    <div class="row-item"><span style="display:inline-block;width:28px;margin-right:6px;border-top:2px solid #2ecc71;"></span> OK (full path)</div>
+    <div class="row-item"><span style="display:inline-block;width:28px;margin-right:6px;border-top:2px dashed #e74c3c;"></span> Direct exposure (no proxy)</div>
+    <div class="row-item"><span style="display:inline-block;width:28px;margin-right:6px;border-top:2px dashed #f39c12;"></span> Warning (no fw / svc down)</div>
+    <div class="row-item"><span style="display:inline-block;width:28px;margin-right:6px;border-top:2px dotted #636e72;"></span> Dropped traffic</div>
+    <div class="row-item"><span style="display:inline-block;width:28px;margin-right:6px;border-top:1px solid #4a5459;"></span> Internal only</div>
     <div class="row-item" style="margin-top:6px; color:#777;">
       Scroll = Zoom &nbsp; Drag = Pan &nbsp; Click = Detail
     </div>
@@ -98,425 +131,579 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='vendor/cytoscape/cytoscape.min.js') }}"></script>
 <script>
-// ── Mock topology data ────────────────────────────────────────
-// Simulates a node running: nginx reverse proxy, multiple services,
-// load balancing, API route splitting, and a direct SSH service.
+(function() {
+  'use strict';
 
-const COLS = { inet: 80, fw: 300, nginx: 540, route: 780, upstream: 980, svc: 1200 };
-const ROW_H = 90;
+  const COLS = { inet: 80, fw: 280, nginx: 520, svc: 780 };
+  const ROW_H = 72;
+  let cy = null;
+  let currentData = null;
 
-function mockElements() {
-  const nodes = [];
-  const edges = [];
-  let y = 60;
+  // ── Cytoscape styles ──────────────────────────────────────────
+  const cyStyles = [
+    { selector: 'node[type="internet"]', style: {
+      'shape': 'diamond', 'background-color': '#e74c3c',
+      'label': 'data(label)', 'color': '#fff',
+      'text-valign': 'center', 'text-halign': 'center',
+      'font-size': '11px', 'text-wrap': 'wrap',
+      'width': 70, 'height': 70,
+      'border-width': 2, 'border-color': '#c0392b',
+    }},
+    { selector: 'node[type="firewall"]', style: {
+      'shape': 'hexagon', 'background-color': '#e67e22',
+      'label': 'data(label)', 'color': '#fff',
+      'text-valign': 'center', 'text-halign': 'center',
+      'font-size': '10px', 'text-wrap': 'wrap',
+      'width': 90, 'height': 55,
+      'border-width': 2, 'border-color': '#d35400',
+    }},
+    { selector: 'node[type="firewall_drop"]', style: {
+      'shape': 'hexagon', 'background-color': '#7f8c8d',
+      'label': 'data(label)', 'color': '#ecf0f1',
+      'text-valign': 'center', 'text-halign': 'center',
+      'font-size': '10px', 'text-wrap': 'wrap',
+      'width': 90, 'height': 55,
+      'border-width': 2, 'border-color': '#636e72', 'border-style': 'dashed',
+    }},
+    { selector: 'node[type="nginx"]', style: {
+      'shape': 'round-rectangle', 'background-color': '#2ecc71',
+      'label': 'data(label)', 'color': '#fff',
+      'text-valign': 'center', 'text-halign': 'center',
+      'font-size': '9px', 'text-wrap': 'wrap',
+      'width': 140, 'height': 46,
+      'border-width': 2, 'border-color': '#27ae60',
+    }},
+    { selector: 'node[type="service"]', style: {
+      'shape': 'ellipse', 'background-color': '#1abc9c',
+      'label': 'data(label)', 'color': '#fff',
+      'text-valign': 'center', 'text-halign': 'center',
+      'font-size': '9px', 'text-wrap': 'wrap',
+      'width': 130, 'height': 46,
+      'border-width': 2, 'border-color': '#16a085',
+    }},
+    { selector: 'node[type="service"][?danger]', style: {
+      'background-color': '#e74c3c', 'border-color': '#c0392b',
+    }},
+    { selector: 'node[type="service"][?warning]', style: {
+      'background-color': '#f39c12', 'border-color': '#e67e22',
+    }},
+    { selector: 'node[type="service"][?down]', style: {
+      'background-color': '#636e72', 'border-color': '#4a5459',
+      'border-style': 'dashed',
+    }},
+    { selector: 'node[type="service"][?internal]', style: {
+      'background-color': '#2d3436', 'border-color': '#636e72',
+      'color': '#b2bec3', 'opacity': 0.6,
+      'width': 100, 'height': 36, 'font-size': '8px',
+    }},
+    { selector: 'node[type="nginx"][?svc_down]', style: {
+      'background-color': '#636e72', 'border-color': '#4a5459',
+      'border-style': 'dashed',
+    }},
+    { selector: 'node:selected', style: {
+      'border-width': 3, 'border-color': '#f1c40f',
+    }},
+    { selector: 'edge', style: {
+      'width': 2, 'line-color': '#7f8c8d',
+      'target-arrow-color': '#7f8c8d', 'target-arrow-shape': 'triangle',
+      'curve-style': 'bezier',
+      'font-size': '9px', 'color': '#bdc3c7',
+      'text-background-color': '#1a1a2e', 'text-background-opacity': 0.8,
+      'text-background-padding': '2px', 'arrow-scale': 0.8,
+    }},
+    { selector: 'edge[label]', style: {
+      'label': 'data(label)',
+    }},
+    { selector: 'edge[?ok]', style: {
+      'line-color': '#2ecc71', 'target-arrow-color': '#2ecc71', 'width': 2,
+    }},
+    { selector: 'edge[?direct]', style: {
+      'line-color': '#e74c3c', 'target-arrow-color': '#e74c3c',
+      'line-style': 'dashed', 'width': 2.5,
+    }},
+    { selector: 'edge[?warn]', style: {
+      'line-color': '#f39c12', 'target-arrow-color': '#f39c12',
+      'line-style': 'dashed', 'width': 2,
+    }},
+    { selector: 'edge[?dropped]', style: {
+      'line-color': '#636e72', 'target-arrow-color': '#636e72',
+      'line-style': 'dotted', 'width': 1, 'target-arrow-shape': 'tee',
+    }},
+    { selector: 'edge[?dimmed]', style: {
+      'line-color': '#4a5459', 'target-arrow-color': '#4a5459',
+      'width': 1, 'opacity': 0.5,
+    }},
+  ];
 
-  function n(id, label, type, col, row, extra) {
+  // ── Build graph elements from API data ────────────────────────
+  function buildElements(data, showInternal) {
+    const nodes = [];
+    const edges = [];
+    const paths = data.paths || [];
+
+    if (paths.length === 0) return { nodes, edges };
+
+    // Classify paths
+    const externalPaths = [];
+    const internalPaths = [];
+
+    paths.forEach(p => {
+      const isInternal = (p.status === 'no_proxy_local') ||
+        (!p.firewall && !p.nginx && p.service && p.service.bind === '127.0.0.1');
+      if (isInternal) {
+        internalPaths.push(p);
+      } else {
+        externalPaths.push(p);
+      }
+    });
+
+    const visiblePaths = showInternal
+      ? externalPaths.concat(internalPaths)
+      : externalPaths;
+
+    // Detect shared firewall policy
+    let sharedFwId = null;
+    const firstFw = paths.find(p => p.firewall);
+    const hasGlobalPolicy = firstFw && firstFw.firewall.policy_type === 'ip_whitelist';
+
+    // Internet node
     nodes.push({
-      data: { id, label, type, ...extra },
-      position: { x: col, y: row },
+      data: { id: 'inet', label: 'Internet', type: 'internet' },
+      position: { x: COLS.inet, y: 0 },  // y set later
+    });
+
+    // Track created service nodes to avoid duplicates
+    const svcNodes = {};
+    let rowIdx = 0;
+
+    // Shared firewall node (if global policy)
+    if (hasGlobalPolicy) {
+      const fw = firstFw.firewall;
+      sharedFwId = 'fw_global';
+      nodes.push({
+        data: {
+          id: sharedFwId,
+          label: 'IP Whitelist\n' + fw.rule_summary,
+          type: 'firewall',
+          detail: fw.rule_summary,
+          action: 'accept_global',
+          policy_type: fw.policy_type,
+          table: fw.table || '',
+        },
+        position: { x: COLS.fw, y: 0 },  // y set later
+      });
+      edges.push({ data: {
+        source: 'inet', target: sharedFwId, label: '',
+      }});
+    }
+
+    // Default DROP node
+    nodes.push({
+      data: {
+        id: 'fw_drop', label: ':*\nDROP', type: 'firewall_drop',
+        action: 'drop', detail: 'Default policy: drop all unmatched',
+      },
+      position: { x: COLS.fw, y: 0 },  // y set later
+    });
+    edges.push({ data: {
+      source: 'inet', target: 'fw_drop', label: 'other', dropped: true,
+    }});
+
+    // Process each visible path
+    visiblePaths.forEach(p => {
+      const port = p.external_port;
+      const y = rowIdx * ROW_H;
+      const isInt = internalPaths.includes(p);
+
+      // Firewall node for this port (if per-port rule, not global)
+      let fwNodeId = sharedFwId;
+      if (p.firewall && !hasGlobalPolicy) {
+        fwNodeId = 'fw_' + port;
+        nodes.push({
+          data: {
+            id: fwNodeId,
+            label: ':' + port + '\nACCEPT',
+            type: 'firewall',
+            port: port,
+            action: p.firewall.action,
+            detail: p.firewall.rule_summary || '',
+          },
+          position: { x: COLS.fw, y: y },
+        });
+        edges.push({ data: { source: 'inet', target: fwNodeId, label: 'tcp/' + port }});
+      }
+
+      // Nginx node
+      if (p.nginx) {
+        const ngxId = 'ngx_' + port;
+        const svcName = p.nginx.service_name || p.nginx.server_name || ('port ' + port);
+        const svcDown = p.status === 'service_down';
+        nodes.push({
+          data: {
+            id: ngxId,
+            label: svcName + '\n:' + port,
+            type: 'nginx',
+            port: port,
+            service_name: p.nginx.service_name || '',
+            server_name: p.nginx.server_name || '',
+            listen: p.nginx.listen || '',
+            backend: p.nginx.backend || '',
+            project: p.nginx.project || '',
+            svc_type: p.nginx.type || '',
+            locations: JSON.stringify(p.nginx.locations || []),
+            svc_down: svcDown ? true : undefined,
+          },
+          position: { x: COLS.nginx, y: y },
+        });
+
+        // Edge: FW -> Nginx
+        if (fwNodeId) {
+          const edgeData = { source: fwNodeId, target: ngxId, label: ':' + port };
+          if (p.status === 'ok') edgeData.ok = true;
+          if (p.status === 'service_down') edgeData.warn = true;
+          edges.push({ data: edgeData });
+        } else {
+          // No firewall - connect from internet with warning
+          edges.push({ data: {
+            source: 'inet', target: ngxId, label: ':' + port + ' (no fw!)', warn: true,
+          }});
+        }
+
+        // Service node (via nginx backend)
+        if (p.service) {
+          const svcKey = p.service.process + '_' + p.service.port;
+          if (!svcNodes[svcKey]) {
+            const svcId = 'svc_' + p.service.port;
+            svcNodes[svcKey] = svcId;
+            nodes.push({
+              data: {
+                id: svcId,
+                label: p.service.process + '\n:' + p.service.port,
+                type: 'service',
+                process: p.service.process,
+                pid: p.service.pid,
+                bind: p.service.bind,
+                port: p.service.port,
+              },
+              position: { x: COLS.svc, y: y },
+            });
+          }
+          const edgeData = { source: ngxId, target: svcNodes[svcKey], label: p.nginx.backend || '' };
+          if (p.status === 'ok') edgeData.ok = true;
+          edges.push({ data: edgeData });
+        } else if (svcDown) {
+          // Nginx but no service - show a ghost node
+          const ghostId = 'svc_down_' + port;
+          nodes.push({
+            data: {
+              id: ghostId,
+              label: '(no process)\n:' + (p.nginx.backend || port),
+              type: 'service',
+              down: true,
+              process: '???',
+              bind: '',
+              port: port,
+            },
+            position: { x: COLS.svc, y: y },
+          });
+          edges.push({ data: {
+            source: ngxId, target: ghostId, label: 'DOWN', warn: true,
+          }});
+        }
+      } else if (p.service) {
+        // No nginx - direct service exposure
+        const svcKey = p.service.process + '_' + p.service.port;
+        if (!svcNodes[svcKey]) {
+          const svcId = 'svc_' + p.service.port;
+          svcNodes[svcKey] = svcId;
+          const isDanger = p.status === 'no_proxy' && (p.service.bind === '0.0.0.0' || p.service.bind === '::');
+          const isWarn = p.status === 'no_firewall';
+          nodes.push({
+            data: {
+              id: svcId,
+              label: p.service.process + '\n:' + p.service.port +
+                (p.service.bind === '0.0.0.0' ? '\n(0.0.0.0)' : ''),
+              type: 'service',
+              process: p.service.process,
+              pid: p.service.pid,
+              bind: p.service.bind,
+              port: p.service.port,
+              danger: isDanger ? true : undefined,
+              warning: isWarn ? true : undefined,
+              internal: isInt ? true : undefined,
+            },
+            position: { x: COLS.svc, y: y },
+          });
+        }
+        const svcId = svcNodes[svcKey];
+
+        // Edge: FW -> Service (direct, bypassing nginx)
+        if (fwNodeId && !isInt) {
+          edges.push({ data: {
+            source: fwNodeId, target: svcId,
+            label: ':' + port + ' (direct)',
+            direct: p.service.bind === '0.0.0.0' || p.service.bind === '::' ? true : undefined,
+            ok: p.service.bind === '127.0.0.1' ? true : undefined,
+          }});
+        } else if (isInt) {
+          edges.push({ data: {
+            source: 'inet', target: svcId, label: '', dimmed: true,
+          }});
+        } else {
+          edges.push({ data: {
+            source: 'inet', target: svcId,
+            label: ':' + port + ' (no fw!)', warn: true,
+          }});
+        }
+      } else if (p.status === 'unused') {
+        // FW rule but nothing listening - skip (just the FW node exists)
+        if (!hasGlobalPolicy && fwNodeId) {
+          // Already created the per-port FW node above, that's sufficient
+        }
+      }
+
+      rowIdx++;
+    });
+
+    // Re-calculate Y positions for balanced layout
+    const totalRows = rowIdx || 1;
+    const totalHeight = totalRows * ROW_H;
+    const offsetY = 60;
+
+    // Position Internet at vertical center
+    const inetNode = nodes.find(n => n.data.id === 'inet');
+    if (inetNode) inetNode.position.y = offsetY + totalHeight / 2;
+
+    // Position shared FW at vertical center
+    if (sharedFwId) {
+      const fwNode = nodes.find(n => n.data.id === sharedFwId);
+      if (fwNode) fwNode.position.y = offsetY + totalHeight / 2;
+    }
+
+    // Position DROP node at bottom
+    const dropNode = nodes.find(n => n.data.id === 'fw_drop');
+    if (dropNode) dropNode.position.y = offsetY + totalHeight + ROW_H;
+
+    // Position path nodes with proper Y
+    let currentRow = 0;
+    nodes.forEach(n => {
+      if (n.data.id === 'inet' || n.data.id === 'fw_drop' || n.data.id === sharedFwId) return;
+      if (n.position.y !== undefined && n.data.type !== 'internet') {
+        // Already positioned relative to rowIdx, add offset
+        n.position.y = offsetY + n.position.y;
+      }
+    });
+
+    // Fix duplicate service node positions - stack them
+    const svcPositions = {};
+    nodes.forEach(n => {
+      if (n.data.type === 'service') {
+        const yKey = Math.round(n.position.y);
+        if (svcPositions[yKey]) {
+          // Shift down to avoid overlap
+          n.position.y += ROW_H * 0.5;
+        }
+        svcPositions[Math.round(n.position.y)] = true;
+      }
+    });
+
+    return { nodes, edges };
+  }
+
+  // ── Status summary bar ────────────────────────────────────────
+  function updateStatusBar(data) {
+    const bar = document.getElementById('status-bar');
+    const counts = { ok: 0, no_proxy: 0, no_firewall: 0, service_down: 0, unused: 0, other: 0 };
+    (data.paths || []).forEach(p => {
+      if (counts[p.status] !== undefined) counts[p.status]++;
+      else counts.other++;
+    });
+
+    const warnings = data.warnings || [];
+    let html = '<strong class="me-2">' + data.hostname + '</strong>';
+    html += '<span class="badge bg-success">' + counts.ok + ' OK</span>';
+    if (counts.no_proxy) html += '<span class="badge bg-danger">' + counts.no_proxy + ' Direct Exposure</span>';
+    if (counts.service_down) html += '<span class="badge bg-danger">' + counts.service_down + ' Service Down</span>';
+    if (counts.no_firewall) html += '<span class="badge bg-warning text-dark">' + counts.no_firewall + ' No Firewall</span>';
+    if (counts.unused) html += '<span class="badge bg-secondary">' + counts.unused + ' Unused</span>';
+    if (warnings.length) {
+      warnings.forEach(w => {
+        if (w.type === 'non_compliant') {
+          html += '<span class="badge bg-warning text-dark">' + w.files.length + ' Non-compliant nginx</span>';
+        }
+      });
+    }
+
+    bar.innerHTML = html;
+    bar.style.display = '';
+  }
+
+  // ── Info panel ────────────────────────────────────────────────
+  function closeInfoPanel() {
+    document.getElementById('info-panel').style.display = 'none';
+  }
+
+  function showInfoPanel(d) {
+    const panel = document.getElementById('info-panel');
+    const title = document.getElementById('ip-title');
+    const body = document.getElementById('ip-body');
+
+    title.textContent = (d.label || '').replace(/\n/g, ' ');
+
+    let html = '<dl>';
+    html += '<dt>Type</dt><dd>' + d.type + '</dd>';
+
+    if (d.type === 'firewall' || d.type === 'firewall_drop') {
+      if (d.port) html += '<dt>Port</dt><dd>' + d.port + '</dd>';
+      html += '<dt>Action</dt><dd>' + (d.action || '').toUpperCase() + '</dd>';
+      if (d.detail) html += '<dt>Rule</dt><dd>' + d.detail + '</dd>';
+      if (d.policy_type) html += '<dt>Policy</dt><dd>' + d.policy_type + '</dd>';
+      if (d.table) html += '<dt>Table</dt><dd>' + d.table + '</dd>';
+    }
+
+    if (d.type === 'nginx') {
+      if (d.service_name) html += '<dt>Service</dt><dd>' + d.service_name + '</dd>';
+      if (d.server_name) html += '<dt>Server Name</dt><dd>' + d.server_name + '</dd>';
+      if (d.listen) html += '<dt>Listen</dt><dd>' + d.listen + '</dd>';
+      if (d.backend) html += '<dt>Backend</dt><dd>' + d.backend + '</dd>';
+      if (d.project) html += '<dt>Project</dt><dd>' + d.project + '</dd>';
+      if (d.svc_type) html += '<dt>Type</dt><dd>' + d.svc_type + '</dd>';
+      if (d.svc_down) html += '<dt>Status</dt><dd style="color:#e74c3c;">Backend process not found</dd>';
+
+      // Show locations
+      try {
+        const locs = JSON.parse(d.locations || '[]');
+        if (locs.length) {
+          html += '<dt>Locations (' + locs.length + ')</dt><dd>';
+          html += '<table class="table table-sm table-dark mb-0" style="font-size:11px;">';
+          locs.forEach(l => {
+            html += '<tr><td><code>' + (l.path || '') + '</code></td>';
+            html += '<td>' + (l.action || '') + '</td></tr>';
+          });
+          html += '</table></dd>';
+        }
+      } catch(e) {}
+    }
+
+    if (d.type === 'service') {
+      html += '<dt>Process</dt><dd>' + (d.process || '???') + '</dd>';
+      if (d.pid) html += '<dt>PID</dt><dd>' + d.pid + '</dd>';
+      html += '<dt>Bind</dt><dd>' + (d.bind || '?') + ':' + (d.port || '?') + '</dd>';
+
+      if (d.danger) {
+        html += '<dt>Warning</dt><dd style="color:#e74c3c;">Direct exposure on 0.0.0.0 without reverse proxy</dd>';
+      }
+      if (d.warning) {
+        html += '<dt>Warning</dt><dd style="color:#f39c12;">No explicit firewall rule</dd>';
+      }
+      if (d.down) {
+        html += '<dt>Status</dt><dd style="color:#636e72;">Process not running</dd>';
+      }
+      if (d.internal) {
+        html += '<dt>Note</dt><dd style="color:#b2bec3;">Internal only (localhost bind, no external exposure)</dd>';
+      }
+    }
+    html += '</dl>';
+
+    body.innerHTML = html;
+    panel.style.display = 'block';
+  }
+
+  // ── Init / reload graph ───────────────────────────────────────
+  function initCy(elements) {
+    if (cy) cy.destroy();
+
+    cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements: elements,
+      minZoom: 0.15,
+      maxZoom: 4,
+      userPanningEnabled: true,
+      userZoomingEnabled: true,
+      boxSelectionEnabled: false,
+      layout: { name: 'preset' },
+      style: cyStyles,
+    });
+
+    cy.fit(null, 50);
+
+    cy.on('tap', 'node', function(evt) {
+      showInfoPanel(evt.target.data());
+    });
+    cy.on('tap', function(evt) {
+      if (evt.target === cy) closeInfoPanel();
     });
   }
-  function e(src, tgt, label, extra) {
-    edges.push({ data: { source: src, target: tgt, label: label || '', ...extra } });
+
+  function fitGraph() {
+    if (cy) cy.fit(null, 50);
   }
 
-  // ── Internet entry ──
-  n('inet', 'Internet', 'internet', COLS.inet, 340);
+  // ── Load data from API ────────────────────────────────────────
+  async function loadNode(nodeId) {
+    if (!nodeId) return;
 
-  // ── Scenario 1: Port 443 → app.example.com → API routes → services ──
-  y = 60;
-  n('fw_443', ':443\nACCEPT', 'firewall', COLS.fw, y + ROW_H * 2,
-    { port: 443, action: 'accept', detail: 'tcp dport 443 accept (ip_whitelist policy)' });
-  n('ngx_app', 'app.example.com\n:443 ssl', 'nginx', COLS.nginx, y + ROW_H * 2,
-    { server_name: 'app.example.com', listen: '0.0.0.0:443 ssl', project: 'main-app' });
+    const overlay = document.getElementById('loading-overlay');
+    overlay.style.display = 'flex';
 
-  // API routes from nginx
-  n('rt_root', '/', 'route', COLS.route, y,
-    { path: '/', action: 'proxy_pass', target: 'http://127.0.0.1:5171' });
-  n('rt_api_users', '/api/users', 'route', COLS.route, y + ROW_H,
-    { path: '/api/users', action: 'proxy_pass', target: 'http://api_pool' });
-  n('rt_api_orders', '/api/orders', 'route', COLS.route, y + ROW_H * 2,
-    { path: '/api/orders', action: 'proxy_pass', target: 'http://api_pool' });
-  n('rt_api_auth', '/api/auth', 'route', COLS.route, y + ROW_H * 3,
-    { path: '/api/auth', action: 'proxy_pass', target: 'http://127.0.0.1:8003' });
-  n('rt_static', '/static', 'route', COLS.route, y + ROW_H * 4,
-    { path: '/static', action: 'return 304 / alias', target: '/var/www/static' });
+    try {
+      const resp = await fetch('{{ url_for("api.topology", node_id=0) }}'.replace('/0', '/' + nodeId));
+      if (!resp.ok) throw new Error('API error: ' + resp.status);
+      currentData = await resp.json();
 
-  // Upstream (load balancer)
-  n('ups_api_pool', 'upstream\napi_pool', 'upstream', COLS.upstream, y + ROW_H * 1.5,
-    { members: '3 backends', algorithm: 'round-robin' });
-
-  // Backend services
-  n('svc_web', 'web-frontend\ngunicorn :5171', 'service', COLS.svc, y,
-    { process: 'gunicorn', pid: 2041, bind: '127.0.0.1', port: 5171 });
-  n('svc_api1', 'api-worker-1\ngunicorn :9001', 'service', COLS.svc, y + ROW_H,
-    { process: 'gunicorn', pid: 3101, bind: '127.0.0.1', port: 9001 });
-  n('svc_api2', 'api-worker-2\ngunicorn :9002', 'service', COLS.svc, y + ROW_H * 2,
-    { process: 'gunicorn', pid: 3102, bind: '127.0.0.1', port: 9002 });
-  n('svc_api3', 'api-worker-3\ngunicorn :9003', 'service', COLS.svc, y + ROW_H * 3,
-    { process: 'gunicorn', pid: 3103, bind: '127.0.0.1', port: 9003 });
-  n('svc_auth', 'auth-service\njava :8003', 'service', COLS.svc, y + ROW_H * 4 - ROW_H / 2,
-    { process: 'java', pid: 4201, bind: '127.0.0.1', port: 8003 });
-
-  // Edges: scenario 1
-  e('inet', 'fw_443', 'tcp/443');
-  e('fw_443', 'ngx_app');
-  e('ngx_app', 'rt_root', '/');
-  e('ngx_app', 'rt_api_users', '/api/users');
-  e('ngx_app', 'rt_api_orders', '/api/orders');
-  e('ngx_app', 'rt_api_auth', '/api/auth');
-  e('ngx_app', 'rt_static', '/static');
-  e('rt_root', 'svc_web');
-  e('rt_api_users', 'ups_api_pool');
-  e('rt_api_orders', 'ups_api_pool');
-  e('ups_api_pool', 'svc_api1', '', { lb: true });
-  e('ups_api_pool', 'svc_api2', '', { lb: true });
-  e('ups_api_pool', 'svc_api3', '', { lb: true });
-  e('rt_api_auth', 'svc_auth');
-
-  // ── Scenario 2: Port 8443 → admin panel ──
-  y = 520;
-  n('fw_8443', ':8443\nACCEPT', 'firewall', COLS.fw, y,
-    { port: 8443, action: 'accept', detail: 'tcp dport 8443 accept' });
-  n('ngx_admin', 'admin.example.com\n:8443 ssl', 'nginx', COLS.nginx, y,
-    { server_name: 'admin.example.com', listen: '0.0.0.0:8443 ssl', project: 'admin' });
-  n('rt_admin_root', '/', 'route', COLS.route, y,
-    { path: '/', action: 'proxy_pass', target: 'http://127.0.0.1:5180' });
-  n('svc_admin', 'admin-panel\ngunicorn :5180', 'service', COLS.svc, y,
-    { process: 'gunicorn', pid: 5010, bind: '127.0.0.1', port: 5180 });
-
-  e('inet', 'fw_8443', 'tcp/8443');
-  e('fw_8443', 'ngx_admin');
-  e('ngx_admin', 'rt_admin_root', '/');
-  e('rt_admin_root', 'svc_admin');
-
-  // ── Scenario 3: Port 80 → redirect to HTTPS ──
-  y = 630;
-  n('fw_80', ':80\nACCEPT', 'firewall', COLS.fw, y,
-    { port: 80, action: 'accept', detail: 'tcp dport 80 accept' });
-  n('ngx_redir', 'redirect\n:80', 'nginx', COLS.nginx, y,
-    { server_name: '_', listen: '0.0.0.0:80', project: 'redirect' });
-  n('rt_redir', '/ (301)', 'route', COLS.route, y,
-    { path: '/', action: 'return 301', target: 'https://$host$request_uri' });
-
-  e('inet', 'fw_80', 'tcp/80');
-  e('fw_80', 'ngx_redir');
-  e('ngx_redir', 'rt_redir', '301 redirect');
-
-  // ── Scenario 4: Port 22 → direct SSH (no nginx) ──
-  y = 740;
-  n('fw_22', ':22\nACCEPT', 'firewall', COLS.fw, y,
-    { port: 22, action: 'accept', detail: 'tcp dport 22 accept (source restricted)' });
-  n('svc_ssh', 'sshd\n:22', 'service', COLS.svc - 250, y,
-    { process: 'sshd', pid: 891, bind: '0.0.0.0', port: 22, direct: true });
-
-  e('inet', 'fw_22', 'tcp/22');
-  e('fw_22', 'svc_ssh', 'direct (no proxy)', { direct: true });
-
-  // ── Scenario 5: Firewall DROP (port scan noise) ──
-  y = 840;
-  n('fw_drop', ':*\nDROP', 'firewall_drop', COLS.fw, y,
-    { port: '*', action: 'drop', detail: 'default policy: drop all unmatched' });
-
-  e('inet', 'fw_drop', 'other', { dropped: true });
-
-  return { nodes, edges };
-}
-
-// ── Cytoscape init ────────────────────────────────────────────
-
-const { nodes, edges } = mockElements();
-
-const cy = cytoscape({
-  container: document.getElementById('cy'),
-  elements: { nodes, edges },
-  minZoom: 0.2,
-  maxZoom: 4,
-  userPanningEnabled: true,
-  userZoomingEnabled: true,
-  boxSelectionEnabled: false,
-  layout: { name: 'preset' },
-  style: [
-    // ── Internet ──
-    {
-      selector: 'node[type="internet"]',
-      style: {
-        'shape': 'diamond',
-        'background-color': '#e74c3c',
-        'label': 'data(label)',
-        'color': '#fff',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '11px',
-        'text-wrap': 'wrap',
-        'width': 70, 'height': 70,
-        'border-width': 2,
-        'border-color': '#c0392b',
-      }
-    },
-    // ── Firewall ACCEPT ──
-    {
-      selector: 'node[type="firewall"]',
-      style: {
-        'shape': 'hexagon',
-        'background-color': '#e67e22',
-        'label': 'data(label)',
-        'color': '#fff',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '10px',
-        'text-wrap': 'wrap',
-        'width': 80, 'height': 60,
-        'border-width': 2,
-        'border-color': '#d35400',
-      }
-    },
-    // ── Firewall DROP ──
-    {
-      selector: 'node[type="firewall_drop"]',
-      style: {
-        'shape': 'hexagon',
-        'background-color': '#7f8c8d',
-        'label': 'data(label)',
-        'color': '#ecf0f1',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '10px',
-        'text-wrap': 'wrap',
-        'width': 80, 'height': 60,
-        'border-width': 2,
-        'border-color': '#636e72',
-        'border-style': 'dashed',
-      }
-    },
-    // ── Nginx ──
-    {
-      selector: 'node[type="nginx"]',
-      style: {
-        'shape': 'round-rectangle',
-        'background-color': '#2ecc71',
-        'label': 'data(label)',
-        'color': '#fff',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '10px',
-        'text-wrap': 'wrap',
-        'width': 130, 'height': 50,
-        'border-width': 2,
-        'border-color': '#27ae60',
-      }
-    },
-    // ── Route / Location ──
-    {
-      selector: 'node[type="route"]',
-      style: {
-        'shape': 'round-rectangle',
-        'background-color': '#3498db',
-        'label': 'data(label)',
-        'color': '#fff',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '10px',
-        'text-wrap': 'wrap',
-        'width': 110, 'height': 36,
-        'border-width': 1,
-        'border-color': '#2980b9',
-      }
-    },
-    // ── Upstream (LB) ──
-    {
-      selector: 'node[type="upstream"]',
-      style: {
-        'shape': 'barrel',
-        'background-color': '#9b59b6',
-        'label': 'data(label)',
-        'color': '#fff',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '10px',
-        'text-wrap': 'wrap',
-        'width': 100, 'height': 55,
-        'border-width': 2,
-        'border-color': '#8e44ad',
-      }
-    },
-    // ── Service / Process ──
-    {
-      selector: 'node[type="service"]',
-      style: {
-        'shape': 'ellipse',
-        'background-color': '#1abc9c',
-        'label': 'data(label)',
-        'color': '#fff',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '10px',
-        'text-wrap': 'wrap',
-        'width': 120, 'height': 50,
-        'border-width': 2,
-        'border-color': '#16a085',
-      }
-    },
-    // ── Node hover ──
-    {
-      selector: 'node:active',
-      style: { 'overlay-opacity': 0.15, 'overlay-color': '#fff' }
-    },
-    {
-      selector: 'node:selected',
-      style: {
-        'border-width': 3,
-        'border-color': '#f1c40f',
-      }
-    },
-    // ── Default edges ──
-    {
-      selector: 'edge',
-      style: {
-        'width': 2,
-        'line-color': '#7f8c8d',
-        'target-arrow-color': '#7f8c8d',
-        'target-arrow-shape': 'triangle',
-        'curve-style': 'bezier',
-        'label': 'data(label)',
-        'font-size': '9px',
-        'color': '#bdc3c7',
-        'text-background-color': '#1a1a2e',
-        'text-background-opacity': 0.8,
-        'text-background-padding': '2px',
-        'arrow-scale': 0.8,
-      }
-    },
-    // ── LB fan-out edges ──
-    {
-      selector: 'edge[?lb]',
-      style: {
-        'line-color': '#9b59b6',
-        'target-arrow-color': '#9b59b6',
-        'line-style': 'dashed',
-        'width': 1.5,
-      }
-    },
-    // ── Direct connection (bypass nginx) ──
-    {
-      selector: 'edge[?direct]',
-      style: {
-        'line-color': '#e74c3c',
-        'target-arrow-color': '#e74c3c',
-        'line-style': 'dashed',
-        'width': 2,
-      }
-    },
-    // ── Dropped traffic ──
-    {
-      selector: 'edge[?dropped]',
-      style: {
-        'line-color': '#636e72',
-        'target-arrow-color': '#636e72',
-        'line-style': 'dotted',
-        'width': 1,
-        'target-arrow-shape': 'tee',
-      }
-    },
-  ],
-});
-
-cy.fit(null, 40);
-
-// ── Layout switching ──────────────────────────────────────────
-
-document.getElementById('layout-select').addEventListener('change', function() {
-  const name = this.value;
-  if (name === 'preset') {
-    // Restore original positions
-    const { nodes: origNodes } = mockElements();
-    origNodes.forEach(nd => {
-      const ele = cy.getElementById(nd.data.id);
-      if (ele.length) ele.position(nd.position);
-    });
-    cy.fit(null, 40);
-  } else if (name === 'breadthfirst') {
-    cy.layout({
-      name: 'breadthfirst',
-      directed: true,
-      roots: '#inet',
-      spacingFactor: 1.2,
-      animate: true,
-      animationDuration: 400,
-    }).run();
+      const showInternal = document.getElementById('show-internal').checked;
+      const elements = buildElements(currentData, showInternal);
+      initCy(elements);
+      updateStatusBar(currentData);
+    } catch(err) {
+      console.error(err);
+      document.getElementById('status-bar').innerHTML =
+        '<span class="badge bg-danger">Failed to load: ' + err.message + '</span>';
+      document.getElementById('status-bar').style.display = '';
+    } finally {
+      overlay.style.display = 'none';
+    }
   }
-});
 
-function fitGraph() { cy.fit(null, 40); }
-function resetView() {
-  document.getElementById('layout-select').value = 'preset';
-  const { nodes: origNodes } = mockElements();
-  origNodes.forEach(nd => {
-    const ele = cy.getElementById(nd.data.id);
-    if (ele.length) ele.position(nd.position);
+  // ── Event bindings ────────────────────────────────────────────
+  document.getElementById('node-select').addEventListener('change', function() {
+    loadNode(this.value);
   });
-  cy.fit(null, 40);
-}
 
-// ── Info panel on node click ──────────────────────────────────
+  document.getElementById('show-internal').addEventListener('change', function() {
+    if (currentData) {
+      const elements = buildElements(currentData, this.checked);
+      initCy(elements);
+    }
+  });
 
-function closeInfoPanel() {
-  document.getElementById('info-panel').style.display = 'none';
-}
+  document.getElementById('layout-select').addEventListener('change', function() {
+    if (!cy) return;
+    if (this.value === 'preset' && currentData) {
+      const showInternal = document.getElementById('show-internal').checked;
+      const elements = buildElements(currentData, showInternal);
+      initCy(elements);
+    } else if (this.value === 'breadthfirst') {
+      cy.layout({
+        name: 'breadthfirst',
+        directed: true,
+        roots: '#inet',
+        spacingFactor: 1.2,
+        animate: true,
+        animationDuration: 400,
+      }).run();
+    }
+  });
 
-cy.on('tap', 'node', function(evt) {
-  const d = evt.target.data();
-  const panel = document.getElementById('info-panel');
-  const title = document.getElementById('ip-title');
-  const body = document.getElementById('ip-body');
-
-  title.textContent = d.label.replace(/\n/g, ' ');
-
-  let html = '<dl>';
-  html += `<dt>Type</dt><dd>${d.type}</dd>`;
-
-  if (d.type === 'firewall' || d.type === 'firewall_drop') {
-    html += `<dt>Port</dt><dd>${d.port}</dd>`;
-    html += `<dt>Action</dt><dd>${d.action.toUpperCase()}</dd>`;
-    html += `<dt>Rule</dt><dd>${d.detail}</dd>`;
+  // Auto-select first online node
+  const sel = document.getElementById('node-select');
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].dataset.status === 'online') {
+      sel.value = sel.options[i].value;
+      loadNode(sel.value);
+      break;
+    }
   }
-  if (d.type === 'nginx') {
-    html += `<dt>Server Name</dt><dd>${d.server_name}</dd>`;
-    html += `<dt>Listen</dt><dd>${d.listen}</dd>`;
-    html += `<dt>Project</dt><dd>${d.project}</dd>`;
-  }
-  if (d.type === 'route') {
-    html += `<dt>Path</dt><dd><code>${d.path}</code></dd>`;
-    html += `<dt>Action</dt><dd>${d.action}</dd>`;
-    html += `<dt>Target</dt><dd>${d.target}</dd>`;
-  }
-  if (d.type === 'upstream') {
-    html += `<dt>Members</dt><dd>${d.members}</dd>`;
-    html += `<dt>Algorithm</dt><dd>${d.algorithm}</dd>`;
-  }
-  if (d.type === 'service') {
-    html += `<dt>Process</dt><dd>${d.process}</dd>`;
-    html += `<dt>PID</dt><dd>${d.pid}</dd>`;
-    html += `<dt>Bind</dt><dd>${d.bind}:${d.port}</dd>`;
-    if (d.direct) html += `<dt>Note</dt><dd style="color:#e74c3c;">Direct exposure (no reverse proxy)</dd>`;
-  }
-  html += '</dl>';
-
-  // Show connected edges summary
-  const inEdges = evt.target.incomers('edge');
-  const outEdges = evt.target.outgoers('edge');
-  if (inEdges.length || outEdges.length) {
-    html += '<hr style="border-color:#495057;">';
-    html += `<dt style="color:#adb5bd;">Inbound</dt><dd>${inEdges.length} connection(s)</dd>`;
-    html += `<dt style="color:#adb5bd;">Outbound</dt><dd>${outEdges.length} connection(s)</dd>`;
-  }
-
-  body.innerHTML = html;
-  panel.style.display = 'block';
-});
-
-cy.on('tap', function(evt) {
-  if (evt.target === cy) closeInfoPanel();
-});
+})();
 </script>
 {% endblock %}

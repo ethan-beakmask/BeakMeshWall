@@ -29,7 +29,8 @@ def nodes():
 @dashboard_bp.route("/topology-graph")
 @login_required
 def topology_graph():
-    return render_template("dashboard/topology_graph.html")
+    nodes = Node.query.order_by(Node.hostname).all()
+    return render_template("dashboard/topology_graph.html", nodes=nodes)
 
 
 @dashboard_bp.route("/topology/<int:node_id>")

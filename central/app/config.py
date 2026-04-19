@@ -17,3 +17,6 @@ class Config:
     PERMANENT_SESSION_LIFETIME = int(
         os.environ.get("BMW_SESSION_LIFETIME", "3600")
     )
+
+    # Unique cookie name to avoid collision with other Flask apps on the same domain
+    SESSION_COOKIE_NAME = "bmw_session"

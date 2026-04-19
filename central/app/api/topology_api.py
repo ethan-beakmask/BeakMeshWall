@@ -90,7 +90,7 @@ def _build_fw_port_index(fw_state):
     for chain in managed.get("chains", []):
         if chain.get("hook") != "input":
             continue
-        for rule in chain.get("rules", []):
+        for rule in (chain.get("rules") or []):
             # Try to extract destination port from rule expression
             expr = rule.get("expr", "")
             port = _extract_port_from_expr(expr)
