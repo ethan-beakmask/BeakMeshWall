@@ -1,0 +1,49 @@
+# BeakMeshWall Agent - Email Transport Configuration Example
+#
+# Use this configuration when the agent cannot reach Central Server
+# directly over the network (e.g. isolated subnets, air-gapped environments).
+# Reports are sent as encrypted email attachments via Gmail SMTP.
+#
+# Setup:
+# 1. Generate a shared AES-256 key:
+#      python3 -c "import os; print(os.urandom(32).hex())"
+# 2. Enable 2-Step Verification on your Gmail account.
+# 3. Create a Gmail App Password:
+#      Google Account > Security > 2-Step Verification > App passwords
+# 4. Fill in the transport.email section below.
+# 5. On Central Server, run email_receiver.py with the same encrypt_key.
+# 6. Register the node via Central Web UI (since HTTP registration is unavailable).
+# 7. Paste the node token into central.token below.
+# 8. Start the agent:
+#      bmw-agent -config config.yaml
+
+central:
+  url: ""                        # Not needed for email transport
+  token: ""                      # Node token (from Central Web UI registration)
+
+agent:
+  hostname: ""                   # Leave empty to auto-detect
+  poll_interval: 300             # Seconds between reports (email mode: 5min recommended)
+
+transport:
+  type: email
+  email:
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    username: your-report-account@gmail.com
+    app_password: xxxx-xxxx-xxxx-xxxx    # Gmail App Password
+    to: your-receiver-account@gmail.com
+    encrypt_key: ""              # 64 hex chars (32 bytes AES-256 key)
+
+firewall:
+  driver: nftables               # or iptables, windows_firewall, pf
+  table: inet beakmeshwall       # Linux nftables only
+
+modules:
+  firewall: true
+  nginx: true
+  service: true
+  sysinfo: true                  # User account auditing (ISO 27001)
+
+nginx:
+  config_path: /etc/nginx/sites-enabled
