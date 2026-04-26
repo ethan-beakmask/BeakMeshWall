@@ -1,16 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://beakmeshwall.local/schemas/firewall_rule.json",
-  "title": "BeakMeshWall Firewall Rule (Stage A)",
-  "description": "Unified firewall rule schema. Stage A covers basic 5-tuple matching (action/direction/proto/src/dst/sport/dport/comment). Translated to native syntax (nftables/iptables/Windows Firewall) by agent driver. See docs/ROADMAP-CONFIG-MANAGEMENT.md.",
+  "title": "BeakMeshWall Firewall Rule (Stage A+B)",
+  "description": "Unified firewall rule schema. Stage A: basic 5-tuple. Stage B adds connection state matching and logging. Translated to native syntax (nftables/iptables/Windows Firewall) by agent driver. See docs/ROADMAP-CONFIG-MANAGEMENT.md.",
   "type": "object",
   "required": ["action", "direction"],
   "additionalProperties": false,
   "properties": {
     "stage": {
       "type": "string",
-      "enum": ["A"],
-      "description": "Schema stage. Stage B/C will extend this."
+      "enum": ["A", "B"],
+      "description": "Schema stage tag. Optional; informational only."
     },
     "action": {
       "type": "string",
@@ -56,6 +56,33 @@
       "type": "string",
       "maxLength": 255,
       "description": "Free-form note. Will be embedded in native rule comment field where supported."
+    },
+    "state": {
+      "type": "array",
+      "description": "Stage B: connection states to match. Empty/absent = no state match.",
+      "items": {
+        "type": "string",
+        "enum": ["new", "established", "related", "invalid"]
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "log_enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Stage B: emit a log entry for matched packets."
+    },
+    "log_prefix": {
+      "type": "string",
+      "maxLength": 32,
+      "default": "BMW: ",
+      "description": "Stage B: log message prefix. Stripped to 32 chars."
+    },
+    "log_level": {
+      "type": "string",
+      "enum": ["debug", "info", "notice", "warning", "error"],
+      "default": "info",
+      "description": "Stage B: log severity."
     }
   }
 }

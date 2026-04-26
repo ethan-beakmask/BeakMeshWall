@@ -2,6 +2,7 @@ package nftables
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/anthropics/beakmeshwall-agent/internal/driver"
@@ -125,6 +126,24 @@ func translate(rule driver.SchemaRule) (chain, body string, err error) {
 		}
 	case "icmp":
 		parts = append(parts, "meta l4proto icmp")
+	}
+
+	// Stage B: connection state matching.
+	if len(rule.State) > 0 {
+		states := append([]string(nil), rule.State...)
+		sort.Strings(states)
+		if len(states) == 1 {
+			parts = append(parts, "ct state "+states[0])
+		} else {
+			parts = append(parts, "ct state { "+strings.Join(states, ", ")+" }")
+		}
+	}
+
+	// Stage B: logging. nft places log before the verdict.
+	if rule.LogEnabled {
+		prefix := defaultStr(rule.LogPrefix, "BMW: ")
+		level := defaultStr(rule.LogLevel, "info")
+		parts = append(parts, fmt.Sprintf(`log prefix "%s" level %s`, sanitizeComment(prefix), level))
 	}
 
 	parts = append(parts, actionTok)

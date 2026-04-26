@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
+	"strings"
 )
 
 
@@ -14,32 +16,43 @@ import (
 // See docs/ROADMAP-CONFIG-MANAGEMENT.md sections 2.3 and 4.1.
 const ManagedComment = "MANAGED BY BeakMeshWall - DO NOT EDIT MANUALLY / 由 BeakMeshWall 管理，請勿手動編輯"
 
-// SchemaRule is the unified Stage A firewall rule, translated by each driver
+// SchemaRule is the unified Stage A+B firewall rule, translated by each driver
 // into its native syntax (nftables / iptables / Windows Firewall).
+//
+// Stage A fields: Action, Direction, Proto, Src, Dst, Sport, Dport, Comment.
+// Stage B fields: State, LogEnabled, LogPrefix, LogLevel.
 //
 // See docs/ROADMAP-CONFIG-MANAGEMENT.md section 3.1.
 type SchemaRule struct {
-	Stage     string `json:"stage,omitempty"`
-	Action    string `json:"action"`              // allow / drop / reject
-	Direction string `json:"direction"`           // input / output / forward
-	Proto     string `json:"proto,omitempty"`     // tcp / udp / icmp / any
-	Src       string `json:"src,omitempty"`       // IPv4 / CIDR / "any"
-	Dst       string `json:"dst,omitempty"`       // IPv4 / CIDR / "any"
-	Sport     string `json:"sport,omitempty"`     // port / "X-Y" / "any"
-	Dport     string `json:"dport,omitempty"`     // port / "X-Y" / "any"
-	Comment   string `json:"comment,omitempty"`
+	Stage      string   `json:"stage,omitempty"`
+	Action     string   `json:"action"`              // allow / drop / reject
+	Direction  string   `json:"direction"`           // input / output / forward
+	Proto      string   `json:"proto,omitempty"`     // tcp / udp / icmp / any
+	Src        string   `json:"src,omitempty"`       // IPv4 / CIDR / "any"
+	Dst        string   `json:"dst,omitempty"`       // IPv4 / CIDR / "any"
+	Sport      string   `json:"sport,omitempty"`     // port / "X-Y" / "any"
+	Dport      string   `json:"dport,omitempty"`     // port / "X-Y" / "any"
+	Comment    string   `json:"comment,omitempty"`
+	State      []string `json:"state,omitempty"`      // new / established / related / invalid
+	LogEnabled bool     `json:"log_enabled,omitempty"`
+	LogPrefix  string   `json:"log_prefix,omitempty"`
+	LogLevel   string   `json:"log_level,omitempty"`  // debug / info / notice / warning / error
 }
 
-// Fingerprint produces a short stable id for a rule, derived from the
-// matching fields only (action/direction/proto/src/dst/sport/dport).
-// Comment is intentionally excluded so that re-comments do not change the id.
+// Fingerprint produces a short stable id for a rule. Used to identify
+// managed rules across ApplyRule/RemoveRule and during drift detection.
+// Must stay byte-identical to schemas.fingerprint() in Python central.
 //
-// Used to identify managed rules across ApplyRule/RemoveRule and during
-// drift detection. All drivers must use this same function so a rule applied
-// on one host can be located by id on another (or after a restart).
+// Canonical key order (Go struct declaration order): A, D, P, S, T, SP, DP,
+// ST, LE, LP, LL. Defaults are filled in for omitted fields so logically
+// equivalent rules produce the same id. Comment is excluded.
 func Fingerprint(rule SchemaRule) string {
+	state := append([]string(nil), rule.State...)
+	sort.Strings(state)
 	canon := struct {
-		A, D, P, S, T, SP, DP string
+		A, D, P, S, T, SP, DP, ST string
+		LE                        bool
+		LP, LL                    string
 	}{
 		A:  rule.Action,
 		D:  rule.Direction,
@@ -48,6 +61,10 @@ func Fingerprint(rule SchemaRule) string {
 		T:  defaultStr(rule.Dst, "any"),
 		SP: defaultStr(rule.Sport, "any"),
 		DP: defaultStr(rule.Dport, "any"),
+		ST: strings.Join(state, ","),
+		LE: rule.LogEnabled,
+		LP: defaultStr(rule.LogPrefix, "BMW: "),
+		LL: defaultStr(rule.LogLevel, "info"),
 	}
 	b, _ := json.Marshal(canon)
 	sum := sha256.Sum256(b)

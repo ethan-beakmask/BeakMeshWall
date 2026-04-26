@@ -47,14 +47,16 @@ def nginx_fingerprint(rule: dict) -> str:
 def fingerprint(rule: dict) -> str:
     """Short stable id for a rule, identical to driver.Fingerprint() in Go.
 
-    The canonical form is a JSON object with keys A,D,P,S,T,SP,DP in that
-    declaration order, with empty values defaulting to "any" for the
-    optional matching fields. Comment is intentionally excluded so that
+    Canonical key order: A, D, P, S, T, SP, DP, ST, LE, LP, LL. Defaults are
+    inserted for omitted fields so a rule that omits log_enabled produces
+    the same id as one that sets log_enabled=false. Comment is excluded so
     re-comments do not change the id.
 
-    The Go and Python implementations must stay byte-identical or rule
-    identification across central/agent will break.
+    Stage B note: changing this set of fields invalidates all previously
+    computed fingerprints. Coordinate with driver.Fingerprint in Go.
     """
+    state = rule.get("state") or []
+    state_canon = ",".join(sorted(state))
     canon = {
         "A": rule.get("action", "") or "",
         "D": rule.get("direction", "") or "",
@@ -63,6 +65,10 @@ def fingerprint(rule: dict) -> str:
         "T": rule.get("dst") or "any",
         "SP": rule.get("sport") or "any",
         "DP": rule.get("dport") or "any",
+        "ST": state_canon,
+        "LE": bool(rule.get("log_enabled", False)),
+        "LP": rule.get("log_prefix") or "BMW: ",
+        "LL": rule.get("log_level") or "info",
     }
     encoded = json.dumps(canon, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:8]

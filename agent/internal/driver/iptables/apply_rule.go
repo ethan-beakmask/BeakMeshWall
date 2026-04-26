@@ -46,12 +46,21 @@ func defaultStr(s, d string) string {
 	return s
 }
 
-// translate converts a Stage A schema rule into the iptables argv slice
-// (without the leading -A or -D, and without the chain name).
+// translate converts a Stage A+B schema rule into the iptables argv slice(s)
+// (without the leading -A/-D and without the chain name).
 //
-// Determinism: for the same SchemaRule the produced slice is identical;
-// drift detection compares the resulting iptables-save line.
-func translate(rule driver.SchemaRule) (chain string, args []string, err error) {
+// When log_enabled is true the schema rule maps to TWO iptables rules:
+//
+//   1. matchArgs + -j LOG --log-prefix ... --log-level ...
+//   2. matchArgs + -j <ACCEPT/DROP/REJECT>
+//
+// The LOG jump does not stop processing, so the action rule still applies.
+// Both rules carry the same BMW-ID in their comment so drift detection and
+// RemoveByFingerprint locate them together.
+//
+// Determinism: same SchemaRule -> same argv, same order, so iptables-save
+// output is byte-stable.
+func translate(rule driver.SchemaRule) (chain string, ruleArgs [][]string, err error) {
 	chain, err = chainOf(rule.Direction)
 	if err != nil {
 		return
@@ -77,31 +86,67 @@ func translate(rule driver.SchemaRule) (chain string, args []string, err error) 
 		return
 	}
 
+	var matchArgs []string
 	if notAny(src) {
-		args = append(args, "-s", src)
+		matchArgs = append(matchArgs, "-s", src)
 	}
 	if notAny(dst) {
-		args = append(args, "-d", dst)
+		matchArgs = append(matchArgs, "-d", dst)
 	}
 	if proto != "any" {
-		args = append(args, "-p", proto)
+		matchArgs = append(matchArgs, "-p", proto)
 		if proto == "tcp" || proto == "udp" {
-			// `-m tcp/-m udp` is implicit when -p is set, but explicit form
-			// is what iptables-save emits, so keep determinism with output.
-			args = append(args, "-m", proto)
+			matchArgs = append(matchArgs, "-m", proto)
 			if notAny(sport) {
-				args = append(args, "--sport", convertPortRange(sport))
+				matchArgs = append(matchArgs, "--sport", convertPortRange(sport))
 			}
 			if notAny(dport) {
-				args = append(args, "--dport", convertPortRange(dport))
+				matchArgs = append(matchArgs, "--dport", convertPortRange(dport))
 			}
 		}
 	}
 
-	args = append(args, "-m", "comment", "--comment", buildComment(rule))
-	args = append(args, "-j", target)
-	args = append(args, targetArgs...)
+	// Stage B: connection state.
+	if len(rule.State) > 0 {
+		matchArgs = append(matchArgs, "-m", "conntrack", "--ctstate", joinStateUpper(rule.State))
+	}
+
+	// Common comment carries BMW-ID for both log and action rules.
+	commentArgs := []string{"-m", "comment", "--comment", buildComment(rule)}
+
+	// Stage B: optional log rule, emitted before the action rule so it
+	// fires first when iptables walks the chain.
+	if rule.LogEnabled {
+		logArgs := append([]string{}, matchArgs...)
+		logArgs = append(logArgs, commentArgs...)
+		logArgs = append(logArgs, "-j", "LOG",
+			"--log-prefix", defaultStr(rule.LogPrefix, "BMW: "),
+			"--log-level", defaultStr(rule.LogLevel, "info"))
+		ruleArgs = append(ruleArgs, logArgs)
+	}
+
+	actionArgs := append([]string{}, matchArgs...)
+	actionArgs = append(actionArgs, commentArgs...)
+	actionArgs = append(actionArgs, "-j", target)
+	actionArgs = append(actionArgs, targetArgs...)
+	ruleArgs = append(ruleArgs, actionArgs)
 	return
+}
+
+func joinStateUpper(states []string) string {
+	upper := make([]string, 0, len(states))
+	for _, s := range states {
+		upper = append(upper, strings.ToUpper(s))
+	}
+	// Sort for deterministic output (matches central-side fingerprint canonicalization).
+	for i := 0; i < len(upper); i++ {
+		for j := i + 1; j < len(upper); j++ {
+			if upper[i] > upper[j] {
+				upper[i], upper[j] = upper[j], upper[i]
+			}
+		}
+	}
+	return strings.Join(upper, ",")
 }
 
 // convertPortRange turns the schema "X-Y" range into iptables "X:Y" syntax.
@@ -126,9 +171,11 @@ func buildComment(rule driver.SchemaRule) string {
 	return full[:maxLen]
 }
 
-// ApplyRule installs a Stage A schema rule, idempotent against BMW-ID.
+// ApplyRule installs a Stage A+B schema rule, idempotent against BMW-ID.
+// Stage B log_enabled emits two rules (LOG + action); both carry the same
+// fingerprint so RemoveRule can clean them up together.
 func (d *IPTDriver) ApplyRule(rule driver.SchemaRule) error {
-	chain, args, err := translate(rule)
+	chain, ruleArgs, err := translate(rule)
 	if err != nil {
 		return fmt.Errorf("translate: %w", err)
 	}
@@ -139,23 +186,19 @@ func (d *IPTDriver) ApplyRule(rule driver.SchemaRule) error {
 	if exists {
 		return nil
 	}
-	return d.run(append([]string{"-A", chain}, args...)...)
+	for _, args := range ruleArgs {
+		if err := d.run(append([]string{"-A", chain}, args...)...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// RemoveRule deletes a previously applied schema rule by BMW-ID.
+// RemoveRule deletes every iptables rule that carries this schema's BMW-ID.
+// Idempotent: missing rules return nil. Loops because line numbers shift
+// after each delete.
 func (d *IPTDriver) RemoveRule(rule driver.SchemaRule) error {
-	exists, line, err := d.findManagedRule(driver.Fingerprint(rule))
-	if err != nil {
-		return fmt.Errorf("scan existing: %w", err)
-	}
-	if !exists {
-		return nil
-	}
-	chain, _, err := translate(rule)
-	if err != nil {
-		return err
-	}
-	return d.run("-D", chain, fmt.Sprint(line))
+	return d.removeByFingerprintAll(driver.Fingerprint(rule))
 }
 
 // findManagedRule scans BMW-* chains for a rule whose comment contains
@@ -185,14 +228,24 @@ func (d *IPTDriver) locateManagedRule(fp string) (string, int, error) {
 	return "", 0, nil
 }
 
-// RemoveByFingerprint removes the managed rule with the given BMW-ID.
+// RemoveByFingerprint removes every managed rule with the given BMW-ID.
+// Stage B may install multiple rules per fingerprint (LOG + action), so we
+// loop until none remain.
 func (d *IPTDriver) RemoveByFingerprint(fp string) error {
-	chain, line, err := d.locateManagedRule(fp)
-	if err != nil {
-		return err
+	return d.removeByFingerprintAll(fp)
+}
+
+func (d *IPTDriver) removeByFingerprintAll(fp string) error {
+	for {
+		chain, line, err := d.locateManagedRule(fp)
+		if err != nil {
+			return err
+		}
+		if line == 0 {
+			return nil
+		}
+		if err := d.run("-D", chain, fmt.Sprint(line)); err != nil {
+			return err
+		}
 	}
-	if line == 0 {
-		return nil
-	}
-	return d.run("-D", chain, fmt.Sprint(line))
 }
