@@ -1,7 +1,8 @@
-"""JSON schema and driver capability loaders.
+"""JSON schema and driver capability loaders, plus rule fingerprint.
 
 See docs/ROADMAP-CONFIG-MANAGEMENT.md for the normative spec.
 """
+import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -23,3 +24,27 @@ def load_driver_capabilities() -> dict:
 
 def supported_drivers() -> list[str]:
     return list(load_driver_capabilities()["drivers"].keys())
+
+
+def fingerprint(rule: dict) -> str:
+    """Short stable id for a rule, identical to driver.Fingerprint() in Go.
+
+    The canonical form is a JSON object with keys A,D,P,S,T,SP,DP in that
+    declaration order, with empty values defaulting to "any" for the
+    optional matching fields. Comment is intentionally excluded so that
+    re-comments do not change the id.
+
+    The Go and Python implementations must stay byte-identical or rule
+    identification across central/agent will break.
+    """
+    canon = {
+        "A": rule.get("action", "") or "",
+        "D": rule.get("direction", "") or "",
+        "P": rule.get("proto") or "any",
+        "S": rule.get("src") or "any",
+        "T": rule.get("dst") or "any",
+        "SP": rule.get("sport") or "any",
+        "DP": rule.get("dport") or "any",
+    }
+    encoded = json.dumps(canon, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:8]

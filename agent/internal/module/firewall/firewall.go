@@ -4,6 +4,10 @@ package firewall
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/anthropics/beakmeshwall-agent/internal/driver"
 )
@@ -17,9 +21,59 @@ func (m *Module) Name() string {
 	return "firewall"
 }
 
-// Collect returns the current firewall state (managed + external tables).
+// Collect returns the current firewall state plus the set of BMW-IDs found
+// in the managed area. Central uses managed_ids for drift detection
+// (P6 Stage D). See docs/ROADMAP-CONFIG-MANAGEMENT.md section 4.2.
 func (m *Module) Collect() (interface{}, error) {
-	return m.drv.GetState()
+	state, err := m.drv.GetState()
+	if err != nil {
+		return nil, err
+	}
+	report := struct {
+		*driver.FirewallState
+		ManagedIDs []string `json:"managed_ids"`
+	}{
+		FirewallState: state,
+		ManagedIDs:    extractManagedIDs(state),
+	}
+	return report, nil
+}
+
+// extractManagedIDs walks the managed table and returns every BMW-ID tag
+// found in rule comments. The BMW-ID is the schema rule fingerprint that
+// driver.Fingerprint() produces (8 hex chars).
+func extractManagedIDs(state *driver.FirewallState) []string {
+	ids := []string{}
+	if state == nil || state.ManagedTable == nil {
+		return ids
+	}
+	for _, ch := range state.ManagedTable.Chains {
+		for _, r := range ch.Rules {
+			if id := extractBMWID(r.Comment); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+func extractBMWID(comment string) string {
+	const tag = "BMW-ID="
+	idx := strings.Index(comment, tag)
+	if idx < 0 {
+		return ""
+	}
+	rest := comment[idx+len(tag):]
+	if len(rest) < 8 {
+		return ""
+	}
+	candidate := rest[:8]
+	for _, ch := range candidate {
+		if !(ch >= '0' && ch <= '9') && !(ch >= 'a' && ch <= 'f') && !(ch >= 'A' && ch <= 'F') {
+			return ""
+		}
+	}
+	return candidate
 }
 
 // Execute runs a firewall task and returns success/detail.
@@ -98,9 +152,75 @@ func (m *Module) Execute(action string, payload map[string]interface{}) (bool, s
 		}
 		return true, "ok"
 
+	case "cleanup_unmanaged":
+		// Reconcile action triggered by the overwrite drift policy.
+		// Removes every managed-area rule whose BMW-ID is not in keep_ids.
+		// Snapshot the managed area before mutating so the operator can
+		// recover if the cleanup decision was wrong.
+		// See docs/ROADMAP-CONFIG-MANAGEMENT.md sections 4.3 and 7 item 3.
+		keepRaw, _ := payload["keep_ids"].([]interface{})
+		keep := map[string]bool{}
+		for _, v := range keepRaw {
+			if s, ok := v.(string); ok {
+				keep[s] = true
+			}
+		}
+		state, err := m.drv.GetState()
+		if err != nil {
+			return false, err.Error()
+		}
+		if state == nil || state.ManagedTable == nil {
+			return true, "no managed area"
+		}
+		backupPath, err := backupManagedArea(state)
+		if err != nil {
+			return false, fmt.Sprintf("backup failed: %s", err)
+		}
+		removed := 0
+		seen := map[string]bool{}
+		for _, ch := range state.ManagedTable.Chains {
+			for _, r := range ch.Rules {
+				id := extractBMWID(r.Comment)
+				if id == "" || keep[id] || seen[id] {
+					continue
+				}
+				if err := m.drv.RemoveByFingerprint(id); err != nil {
+					return false, fmt.Sprintf("remove %s: %s (backup=%s)", id, err, backupPath)
+				}
+				seen[id] = true
+				removed++
+			}
+		}
+		return true, fmt.Sprintf("removed %d unmanaged (backup=%s)", removed, backupPath)
+
 	default:
 		return false, fmt.Sprintf("unknown firewall action: %s", action)
 	}
+}
+
+// backupManagedArea writes the current FirewallState JSON to a timestamped
+// file inside BMW_DRIFT_BACKUP_DIR (default: <TempDir>/beakmeshwall-drift-backup).
+// Returns the file path so it can be reported back to Central.
+//
+// Per docs/ROADMAP-CONFIG-MANAGEMENT.md section 2.4 (overwrite must back up).
+func backupManagedArea(state *driver.FirewallState) (string, error) {
+	dir := os.Getenv("BMW_DRIFT_BACKUP_DIR")
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), "beakmeshwall-drift-backup")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	ts := time.Now().UTC().Format("20060102-150405")
+	path := filepath.Join(dir, "firewall-"+ts+".json")
+	body, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal state: %w", err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		return "", fmt.Errorf("write backup: %w", err)
+	}
+	return path, nil
 }
 
 // decodeSchemaRule extracts the "rule" sub-object from a payload and

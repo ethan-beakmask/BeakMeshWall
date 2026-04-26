@@ -125,4 +125,9 @@ type Driver interface {
 	// area, identified by content equivalence. Idempotent: missing rule
 	// returns nil.
 	RemoveRule(rule SchemaRule) error
+
+	// RemoveByFingerprint deletes the managed rule whose comment carries
+	// BMW-ID=<fingerprint>. Used by drift reconcile to evict managed-area
+	// rules that are not in central's expected set. Idempotent.
+	RemoveByFingerprint(fingerprint string) error
 }

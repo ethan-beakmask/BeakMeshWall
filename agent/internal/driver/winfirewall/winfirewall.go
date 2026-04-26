@@ -61,6 +61,7 @@ foreach ($r in $all) {
         $managed += @{
             Name          = $r.Name
             DisplayName   = $r.DisplayName
+            Description   = "$($r.Description)"
             Direction     = "$($r.Direction)"
             Action        = "$($r.Action)"
             Enabled       = "$($r.Enabled)"
@@ -107,10 +108,17 @@ $profiles = @(Get-NetFirewallProfile | ForEach-Object {
 	mIn := driver.Chain{Name: "Inbound", Type: "filter", Hook: "input"}
 	mOut := driver.Chain{Name: "Outbound", Type: "filter", Hook: "output"}
 	for _, r := range fs.Managed {
+		// Schema-driven rules (apply_rule) put the BMW-ID and warning in
+		// Description; legacy rules (BlockIP) put a label in DisplayName.
+		// Prefer Description when present so drift detection can read BMW-ID.
+		ruleComment := r.DisplayName
+		if r.Description != "" {
+			ruleComment = r.Description
+		}
 		rule := driver.Rule{
 			Handle:  extractHandle(r.Name),
 			Expr:    formatManagedExpr(r),
-			Comment: r.DisplayName,
+			Comment: ruleComment,
 		}
 		switch r.Direction {
 		case "Inbound":
@@ -326,6 +334,7 @@ func (d *WinDriver) ps(script string) ([]byte, error) {
 type psRule struct {
 	Name          string   `json:"Name"`
 	DisplayName   string   `json:"DisplayName"`
+	Description   string   `json:"Description"`
 	Direction     string   `json:"Direction"`
 	Action        string   `json:"Action"`
 	Enabled       string   `json:"Enabled"`

@@ -27,3 +27,21 @@ class Config:
         "BMW_EDL_EXPORT_DIR",
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "edl_export"),
     )
+
+    # Drift notification (P6 Stage D).
+    # If BMW_SMTP_HOST is set, drift alerts are sent via SMTP to BMW_NOTIFY_TO.
+    # Otherwise, alerts are appended to BMW_NOTIFY_LOG_PATH (stub mode).
+    SMTP_HOST = os.environ.get("BMW_SMTP_HOST", "")
+    SMTP_PORT = int(os.environ.get("BMW_SMTP_PORT", "25"))
+    SMTP_FROM = os.environ.get("BMW_SMTP_FROM", "beakmeshwall@localhost")
+    SMTP_USER = os.environ.get("BMW_SMTP_USER", "")
+    SMTP_PASSWORD = os.environ.get("BMW_SMTP_PASSWORD", "")
+    NOTIFY_TO = os.environ.get("BMW_NOTIFY_TO", "")
+    NOTIFY_LOG_PATH = os.environ.get(
+        "BMW_NOTIFY_LOG_PATH", "/opt/tmp/BeakMeshWall-dev-central-drift_notifications.log"
+    )
+
+    # Drift backup directory (used by overwrite policy before reconcile).
+    DRIFT_BACKUP_DIR = os.environ.get(
+        "BMW_DRIFT_BACKUP_DIR", "/opt/tmp/beakmeshwall-drift-backup"
+    )

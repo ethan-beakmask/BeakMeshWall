@@ -61,6 +61,24 @@ func (d *WinDriver) RemoveRule(rule driver.SchemaRule) error {
 	return nil
 }
 
+// RemoveByFingerprint removes the schema-applied rule named BMW-S-<fp>.
+// Idempotent: missing rule returns nil.
+func (d *WinDriver) RemoveByFingerprint(fp string) error {
+	name := schemaRulePrefix + fp
+	exists, err := d.ruleExists(name)
+	if err != nil {
+		return fmt.Errorf("check existing: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	script := fmt.Sprintf(`Remove-NetFirewallRule -Name "%s" -ErrorAction Stop`, name)
+	if _, err := d.ps(script); err != nil {
+		return fmt.Errorf("remove rule: %w", err)
+	}
+	return nil
+}
+
 func (d *WinDriver) ruleExists(name string) (bool, error) {
 	script := fmt.Sprintf(
 		`if (Get-NetFirewallRule -Name "%s" -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }`,

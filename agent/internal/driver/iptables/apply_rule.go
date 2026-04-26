@@ -161,20 +161,38 @@ func (d *IPTDriver) RemoveRule(rule driver.SchemaRule) error {
 // findManagedRule scans BMW-* chains for a rule whose comment contains
 // BMW-ID=<fp>. Returns the 1-based line number within its chain.
 func (d *IPTDriver) findManagedRule(fp string) (bool, int, error) {
+	_, line, err := d.locateManagedRule(fp)
+	return line > 0, line, err
+}
+
+// locateManagedRule additionally returns the BMW-* chain containing the rule.
+func (d *IPTDriver) locateManagedRule(fp string) (string, int, error) {
 	state, err := d.GetState()
 	if err != nil {
-		return false, 0, err
+		return "", 0, err
 	}
 	if state.ManagedTable == nil {
-		return false, 0, nil
+		return "", 0, nil
 	}
 	needle := "BMW-ID=" + fp
 	for _, ch := range state.ManagedTable.Chains {
 		for _, r := range ch.Rules {
 			if strings.Contains(r.Comment, needle) {
-				return true, r.Handle, nil
+				return ch.Name, r.Handle, nil
 			}
 		}
 	}
-	return false, 0, nil
+	return "", 0, nil
+}
+
+// RemoveByFingerprint removes the managed rule with the given BMW-ID.
+func (d *IPTDriver) RemoveByFingerprint(fp string) error {
+	chain, line, err := d.locateManagedRule(fp)
+	if err != nil {
+		return err
+	}
+	if line == 0 {
+		return nil
+	}
+	return d.run("-D", chain, fmt.Sprint(line))
 }

@@ -16,3 +16,13 @@ class Node(db.Model):
     last_seen_at = db.Column(db.DateTime(timezone=True))
     registered_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     config_json = db.Column(db.Text)  # Agent-reported config snapshot (JSON)
+
+    # Drift handling per docs/ROADMAP-CONFIG-MANAGEMENT.md section 4.3.
+    # JSON keyed by subsystem -> policy. Currently only "firewall" is honored;
+    # future subsystems (nginx) will plug in here.
+    # policy: detect-only | notify | overwrite. Default: notify.
+    drift_policies = db.Column(db.Text, default='{"firewall":"notify"}')
+
+    # Per-node override for drift detection cadence in seconds.
+    # Allowed range 60-3600. NULL means use the global default (300s).
+    drift_check_interval = db.Column(db.Integer)

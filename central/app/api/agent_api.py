@@ -8,6 +8,12 @@ from app.api import api_bp
 from app.extensions import db
 from app.models.node import Node
 from app.models.task import Task
+from app.schemas import fingerprint
+from app.services.drift_detector import (
+    detect_and_handle,
+    mark_managed_rule_removed,
+    upsert_managed_rule,
+)
 
 
 def require_agent_token(f):
@@ -109,10 +115,15 @@ def agent_report(node=None):
         if not task_id:
             continue
         task = Task.query.filter_by(id=task_id, node_id=node.id).first()
-        if task:
-            task.status = "success" if result.get("success") else "failed"
-            task.result = json.dumps(result.get("detail", ""))
-            task.completed_at = now
+        if not task:
+            continue
+        success = bool(result.get("success"))
+        task.status = "success" if success else "failed"
+        task.result = json.dumps(result.get("detail", ""))
+        task.completed_at = now
+
+        if success:
+            _sync_managed_rule_from_task(node.id, task)
 
     # Store state snapshot (firewall + nginx + service)
     state = {}
@@ -128,5 +139,36 @@ def agent_report(node=None):
 
     node.config_json = json.dumps(state)
 
+    # Drift detection: compare reported managed BMW-IDs against expected set.
+    fw_state = data.get("fw_state") or {}
+    actual_ids = fw_state.get("managed_ids")
+    if isinstance(actual_ids, list):
+        try:
+            detect_and_handle(node, "firewall", actual_ids)
+        except Exception:
+            # Drift detection must not block report ingestion. Detection
+            # failures will be surfaced by missing DriftEvent rows for the
+            # window; commit the rest first.
+            db.session.rollback()
+            db.session.add(node)
+
     db.session.commit()
     return jsonify({"status": "ok"})
+
+
+def _sync_managed_rule_from_task(node_id: int, task: Task) -> None:
+    """Update managed_rules table when an apply_rule/remove_rule task succeeds."""
+    if task.action not in ("apply_rule", "remove_rule"):
+        return
+    try:
+        payload = json.loads(task.payload)
+    except (TypeError, ValueError):
+        return
+    rule = payload.get("rule")
+    if not isinstance(rule, dict):
+        return
+    fp = fingerprint(rule)
+    if task.action == "apply_rule":
+        upsert_managed_rule(node_id, rule, fp)
+    else:
+        mark_managed_rule_removed(node_id, fp)
