@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beakmeshwall.local/schemas/nginx_rule.json",
+  "title": "BeakMeshWall Nginx Access Rule (Stage alpha)",
+  "description": "Per-IP allow/deny rule rendered into /etc/nginx/conf.d/beakmeshwall/access.conf. See docs/NGINX-MANAGEMENT.md.",
+  "type": "object",
+  "required": ["action", "src"],
+  "additionalProperties": false,
+  "properties": {
+    "stage": {
+      "type": "string",
+      "enum": ["alpha"]
+    },
+    "action": {
+      "type": "string",
+      "enum": ["allow", "deny"]
+    },
+    "src": {
+      "type": "string",
+      "description": "Source: IPv4 / CIDR / 'all'.",
+      "pattern": "^(all|((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(/(3[0-2]|[12]?[0-9]))?)$"
+    },
+    "comment": {
+      "type": "string",
+      "maxLength": 255
+    }
+  }
+}

@@ -33,10 +33,15 @@ type Server struct {
 
 // State is the collected nginx configuration state.
 type State struct {
-	ConfigPath       string   `json:"config_path"`
-	Compliant        bool     `json:"compliant"`
-	Servers          []Server `json:"servers"`
-	NonCompliantFiles []string `json:"non_compliant_files"`
+	ConfigPath        string                      `json:"config_path"`
+	Compliant         bool                        `json:"compliant"`
+	Servers           []Server                    `json:"servers"`
+	NonCompliantFiles []string                    `json:"non_compliant_files"`
+	// BMW-managed snippet files. Keyed by file basename (e.g. "access.conf").
+	// Used by central drift detection.
+	ManagedFiles map[string]*AccessFileState `json:"managed_files,omitempty"`
+	// Aggregate of every BMW-ID found in ManagedFiles, for drift comparison.
+	ManagedIDs []string `json:"managed_ids"`
 }
 
 // Module implements module.Module for nginx config collection.
@@ -84,7 +89,57 @@ func (m *Module) Collect() (interface{}, error) {
 		state.Servers = append(state.Servers, *server)
 	}
 
+	// Stage alpha: also surface the BMW-managed access.conf if present.
+	access, _ := readAccessFile()
+	if access != nil {
+		state.ManagedFiles = map[string]*AccessFileState{"access.conf": access}
+		state.ManagedIDs = append(state.ManagedIDs, access.ManagedIDs...)
+	}
+	if state.ManagedIDs == nil {
+		state.ManagedIDs = []string{}
+	}
+
 	return state, nil
+}
+
+// Execute implements module.Executor for nginx subsystem tasks.
+//
+// Stage alpha actions:
+//   apply_nginx_access  -- payload: {path, content}; write content to
+//                          path under ManagedDir, run nginx -t, reload.
+//
+// See docs/NGINX-MANAGEMENT.md sections 5 and 6.
+func (m *Module) Execute(action string, payload map[string]interface{}) (bool, string) {
+	switch action {
+	case "apply_nginx_access":
+		path, _ := payload["path"].(string)
+		content, _ := payload["content"].(string)
+		if path == "" || content == "" {
+			return false, "missing path or content"
+		}
+		// We only honor writes inside ManagedDir, no exceptions.
+		if !strings.HasPrefix(path, ManagedDir+"/") {
+			return false, fmt.Sprintf("refuse to write outside %s: %s", ManagedDir, path)
+		}
+		// Stage alpha currently only supports access.conf; reject other
+		// file names so a mistaken payload cannot create stray files.
+		if path != AccessConfPath {
+			return false, fmt.Sprintf("stage alpha only supports %s", AccessConfPath)
+		}
+		backup, err := applyAccessFile(content)
+		if err != nil {
+			if backup != "" {
+				return false, fmt.Sprintf("%s (backup=%s)", err, backup)
+			}
+			return false, err.Error()
+		}
+		if backup != "" {
+			return true, fmt.Sprintf("ok (backup=%s)", backup)
+		}
+		return true, "ok"
+	default:
+		return false, fmt.Sprintf("unknown nginx action: %s", action)
+	}
 }
 
 // BMW tag patterns

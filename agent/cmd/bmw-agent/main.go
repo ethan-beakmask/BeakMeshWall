@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/anthropics/beakmeshwall-agent/internal/client"
@@ -102,7 +103,7 @@ func main() {
 
 	// Initialize modules
 	var modules []module.Module
-	var executor module.Executor
+	executors := map[string]module.Executor{}
 
 	if cfg.Modules.Firewall {
 		fwMod, err := firewall.New(cfg.Firewall.Driver, cfg.Firewall.Table)
@@ -110,13 +111,14 @@ func main() {
 			log.Fatalf("ERROR: init firewall module: %v", err)
 		}
 		modules = append(modules, fwMod)
-		executor = fwMod
+		executors["firewall"] = fwMod
 		log.Printf("INFO: firewall module enabled (driver: %s)", cfg.Firewall.Driver)
 	}
 
 	if cfg.Modules.Nginx {
 		ngxMod := nginx.New(cfg.Nginx.ConfigPath)
 		modules = append(modules, ngxMod)
+		executors["nginx"] = ngxMod
 		log.Printf("INFO: nginx module enabled (path: %s)", cfg.Nginx.ConfigPath)
 	}
 
@@ -164,7 +166,7 @@ func main() {
 			version, len(modules), cfg.Central.URL, cfg.Agent.PollInterval)
 
 		done := make(chan struct{})
-		go runPollLoop(c, modules, executor, cfg.Agent.PollInterval, done)
+		go runPollLoop(c, modules, executors, cfg.Agent.PollInterval, done)
 		waitForShutdown(len(modules), cfg.Agent.PollInterval)
 		close(done)
 	}
@@ -234,36 +236,43 @@ func doCollectAndReport(rpt reporter, modules []module.Module) {
 	log.Printf("INFO: collect ok, state reported (%d modules)", len(modules))
 }
 
-func runPollLoop(c *client.Client, modules []module.Module, executor module.Executor, intervalSec int, done <-chan struct{}) {
+func runPollLoop(c *client.Client, modules []module.Module, executors map[string]module.Executor, intervalSec int, done <-chan struct{}) {
 	ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
 	defer ticker.Stop()
 
-	doPoll(c, modules, executor)
+	doPoll(c, modules, executors)
 
 	for {
 		select {
 		case <-ticker.C:
-			doPoll(c, modules, executor)
+			doPoll(c, modules, executors)
 		case <-done:
 			return
 		}
 	}
 }
 
-func doPoll(c *client.Client, modules []module.Module, executor module.Executor) {
+func doPoll(c *client.Client, modules []module.Module, executors map[string]module.Executor) {
 	resp, err := c.Poll()
 	if err != nil {
 		log.Printf("WARN: poll failed: %v", err)
 		return
 	}
 
-	// Execute tasks via the executor (firewall module)
+	// Route each task to the executor that owns its action namespace.
 	var taskResults []map[string]interface{}
-	if executor != nil {
-		for _, task := range resp.Tasks {
-			result := executeTask(executor, task)
-			taskResults = append(taskResults, result)
+	for _, task := range resp.Tasks {
+		executor := executorForAction(executors, task.Action)
+		if executor == nil {
+			taskResults = append(taskResults, map[string]interface{}{
+				"task_id": task.ID,
+				"success": false,
+				"detail":  fmt.Sprintf("no executor for action %s", task.Action),
+			})
+			continue
 		}
+		result := executeTask(executor, task)
+		taskResults = append(taskResults, result)
 	}
 
 	// Collect state from all modules
@@ -303,6 +312,17 @@ func doPoll(c *client.Client, modules []module.Module, executor module.Executor)
 	} else {
 		log.Printf("INFO: poll ok, state reported (%d modules)", len(modules))
 	}
+}
+
+// executorForAction picks the executor responsible for a given task action.
+// Routing is by prefix: "apply_nginx_*" / "remove_nginx_*" go to the nginx
+// module; everything else (apply_rule, remove_rule, block_ip, cleanup_unmanaged
+// etc.) goes to the firewall module.
+func executorForAction(executors map[string]module.Executor, action string) module.Executor {
+	if strings.Contains(action, "nginx") {
+		return executors["nginx"]
+	}
+	return executors["firewall"]
 }
 
 func executeTask(executor module.Executor, task client.TaskItem) map[string]interface{} {

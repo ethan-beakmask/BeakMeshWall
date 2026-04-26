@@ -26,3 +26,8 @@ class Node(db.Model):
     # Per-node override for drift detection cadence in seconds.
     # Allowed range 60-3600. NULL means use the global default (300s).
     drift_check_interval = db.Column(db.Integer)
+
+    # Whether central pushes nginx-subsystem tasks (apply_nginx_access etc.)
+    # and runs nginx drift detection on this node. Default off; toggled via
+    # /api/v1/nginx/managed. See docs/NGINX-MANAGEMENT.md section 2.2.
+    nginx_managed = db.Column(db.Boolean, nullable=False, default=False)

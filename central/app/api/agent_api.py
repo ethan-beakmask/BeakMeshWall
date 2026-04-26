@@ -139,16 +139,22 @@ def agent_report(node=None):
 
     node.config_json = json.dumps(state)
 
-    # Drift detection: compare reported managed BMW-IDs against expected set.
+    # Drift detection per subsystem.
     fw_state = data.get("fw_state") or {}
-    actual_ids = fw_state.get("managed_ids")
-    if isinstance(actual_ids, list):
+    fw_actual = fw_state.get("managed_ids")
+    if isinstance(fw_actual, list):
         try:
-            detect_and_handle(node, "firewall", actual_ids)
+            detect_and_handle(node, "firewall", fw_actual)
         except Exception:
-            # Drift detection must not block report ingestion. Detection
-            # failures will be surfaced by missing DriftEvent rows for the
-            # window; commit the rest first.
+            db.session.rollback()
+            db.session.add(node)
+
+    nginx_state = data.get("nginx_state") or {}
+    nginx_actual = nginx_state.get("managed_ids")
+    if isinstance(nginx_actual, list) and getattr(node, "nginx_managed", False):
+        try:
+            detect_and_handle(node, "nginx", nginx_actual)
+        except Exception:
             db.session.rollback()
             db.session.add(node)
 

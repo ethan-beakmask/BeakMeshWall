@@ -88,56 +88,85 @@ def detect_and_handle(
             event.backup_path = f"notify-failed: {exc}"
 
     if policy == "overwrite":
-        task_ids = _dispatch_reconcile_tasks(node, missing, extra)
+        task_ids = _dispatch_reconcile_tasks(node, subsystem, missing, extra)
         event.reconcile_task_ids = json.dumps(task_ids)
 
     return event
 
 
 def _dispatch_reconcile_tasks(
-    node: Node, missing: list[str], extra: list[str]
+    node: Node, subsystem: str, missing: list[str], extra: list[str]
 ) -> list[int]:
     """Schedule reconcile tasks for the overwrite policy.
 
-    For each missing fingerprint, the agent will re-apply the schema rule
-    pulled from managed_rules. Extra fingerprints are removed via
-    `unmanaged_cleanup` action: BMW-IDs not in our expected set may have been
-    left over from a different BMW Central or by a manual edit.
+    Firewall: per-rule. Missing -> apply_rule(rule), extra -> cleanup_unmanaged(keep_ids).
+    Nginx: file-level. Either way (missing or extra) -> regenerate the full
+    access.conf and dispatch a single apply_nginx_access task.
     """
     task_ids: list[int] = []
 
-    if missing:
-        rules = ManagedRule.query.filter(
-            ManagedRule.node_id == node.id,
-            ManagedRule.subsystem == "firewall",
-            ManagedRule.fingerprint.in_(missing),
-            ManagedRule.status == "active",
-        ).all()
-        for r in rules:
-            try:
-                rule_obj = json.loads(r.schema_rule)
-            except (TypeError, ValueError):
-                continue
+    if subsystem == "firewall":
+        if missing:
+            rules = ManagedRule.query.filter(
+                ManagedRule.node_id == node.id,
+                ManagedRule.subsystem == "firewall",
+                ManagedRule.fingerprint.in_(missing),
+                ManagedRule.status == "active",
+            ).all()
+            for r in rules:
+                try:
+                    rule_obj = json.loads(r.schema_rule)
+                except (TypeError, ValueError):
+                    continue
+                t = Task(
+                    node_id=node.id,
+                    action="apply_rule",
+                    payload=json.dumps({"rule": rule_obj}),
+                    created_by="drift-reconcile",
+                )
+                db.session.add(t)
+                db.session.flush()
+                task_ids.append(t.id)
+
+        if extra:
             t = Task(
                 node_id=node.id,
-                action="apply_rule",
-                payload=json.dumps({"rule": rule_obj}),
+                action="cleanup_unmanaged",
+                payload=json.dumps({"keep_ids": list(expected_fingerprints(node.id))}),
                 created_by="drift-reconcile",
             )
             db.session.add(t)
             db.session.flush()
             task_ids.append(t.id)
+        return task_ids
 
-    if extra:
+    if subsystem == "nginx":
+        if not (missing or extra):
+            return task_ids
+        # Late import to avoid a circular import at module load time
+        # (nginx_generator -> schemas; agent_api -> drift_detector).
+        from app.services.nginx_generator import generate_access_conf
+        from app.api.nginx_api import ACCESS_CONF_PATH
+
+        rules = []
+        for r in ManagedRule.query.filter_by(
+            node_id=node.id, subsystem="nginx", status="active"
+        ).all():
+            try:
+                rules.append(json.loads(r.schema_rule))
+            except (TypeError, ValueError):
+                continue
+        content = generate_access_conf(rules)
         t = Task(
             node_id=node.id,
-            action="cleanup_unmanaged",
-            payload=json.dumps({"keep_ids": list(expected_fingerprints(node.id))}),
+            action="apply_nginx_access",
+            payload=json.dumps({"path": ACCESS_CONF_PATH, "content": content}),
             created_by="drift-reconcile",
         )
         db.session.add(t)
         db.session.flush()
         task_ids.append(t.id)
+        return task_ids
 
     return task_ids
 

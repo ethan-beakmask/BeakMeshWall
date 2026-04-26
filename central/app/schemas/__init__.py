@@ -22,8 +22,26 @@ def load_driver_capabilities() -> dict:
         return json.load(f)
 
 
+@lru_cache(maxsize=1)
+def load_nginx_rule_schema() -> dict:
+    with (_SCHEMA_DIR / "nginx_rule.json").open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def supported_drivers() -> list[str]:
     return list(load_driver_capabilities()["drivers"].keys())
+
+
+def nginx_fingerprint(rule: dict) -> str:
+    """Short stable id for an nginx access rule. Identical to Go side.
+
+    Canonical form: {"A": action, "S": src} JSON-encoded with no whitespace,
+    sha256, take first 8 hex chars. Comment excluded (re-comment must not
+    change id).
+    """
+    canon = {"A": rule.get("action", "") or "", "S": rule.get("src", "") or ""}
+    encoded = json.dumps(canon, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:8]
 
 
 def fingerprint(rule: dict) -> str:
