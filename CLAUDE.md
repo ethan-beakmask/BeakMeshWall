@@ -34,7 +34,7 @@
 - **P3**: Counters 回報 + External Table 觀察 + Audit Log (done)
 - **P4**: iptables/pf Driver + OIDC 可選對接 (partial -- OIDC done; iptables/pf 重新規劃至 P6)
 - **P5**: Request Path Topology -- Agent module 化 + nginx/service collector + 三層路徑拓撲 UI (done)
-- **P6**: 統一組態接管（防火牆 schema + 接管控制面 + nginx 納管），規範見 `docs/ROADMAP-CONFIG-MANAGEMENT.md`（進行中：firewall A/D done; nginx α done; firewall B/C 待排）
+- **P6**: 統一組態接管（防火牆 schema + 接管控制面 + nginx 納管），規範見 `docs/ROADMAP-CONFIG-MANAGEMENT.md`（firewall A/B/C + D done; nginx α done; UI 改造未做）
 
 ## 開發環境
 - Central: 192.168.0.16

@@ -3,10 +3,10 @@
   "$id": "https://beakmeshwall.local/schemas/driver_capabilities.json",
   "title": "BeakMeshWall Driver Capability Map",
   "description": "Per-driver capability map. Lists which schema fields and which enum values each driver supports. Central uses this to validate that a rule can be deployed to a target node before sending. See docs/ROADMAP-CONFIG-MANAGEMENT.md section 3.4.",
-  "version": "stage-B",
+  "version": "stage-C",
   "drivers": {
     "nftables": {
-      "stage": "B",
+      "stage": "C",
       "fields": {
         "action": {"supported": true, "values": ["allow", "drop", "reject"]},
         "direction": {"supported": true, "values": ["input", "output", "forward"]},
@@ -19,11 +19,14 @@
         "state": {"supported": true},
         "log_enabled": {"supported": true},
         "log_prefix": {"supported": true},
-        "log_level": {"supported": true, "values": ["debug", "info", "notice", "warning", "error"]}
+        "log_level": {"supported": true, "values": ["debug", "info", "notice", "warning", "error"]},
+        "rate_limit": {"supported": true},
+        "src_set": {"supported": true},
+        "dst_set": {"supported": true}
       }
     },
     "iptables": {
-      "stage": "B",
+      "stage": "C",
       "fields": {
         "action": {"supported": true, "values": ["allow", "drop", "reject"]},
         "direction": {"supported": true, "values": ["input", "output", "forward"]},
@@ -36,7 +39,10 @@
         "state": {"supported": true},
         "log_enabled": {"supported": true},
         "log_prefix": {"supported": true},
-        "log_level": {"supported": true, "values": ["debug", "info", "notice", "warning", "error"]}
+        "log_level": {"supported": true, "values": ["debug", "info", "notice", "warning", "error"]},
+        "rate_limit": {"supported": true},
+        "src_set": {"supported": true, "frozen_reason": "Requires ipset(8) installed on the agent node."},
+        "dst_set": {"supported": true, "frozen_reason": "Requires ipset(8) installed on the agent node."}
       }
     },
     "windows_firewall": {
@@ -67,7 +73,10 @@
         "state": {"supported": false, "frozen_reason": "Windows stateful semantics differ; locked at A."},
         "log_enabled": {"supported": false, "frozen_reason": "Stage B logging is not implemented for Windows Firewall."},
         "log_prefix": {"supported": false},
-        "log_level": {"supported": false}
+        "log_level": {"supported": false},
+        "rate_limit": {"supported": false, "frozen_reason": "Windows Firewall has no native per-rule rate limit; QoS Policy is out of scope."},
+        "src_set": {"supported": false, "frozen_reason": "Windows Firewall has no ipset equivalent."},
+        "dst_set": {"supported": false}
       }
     }
   }

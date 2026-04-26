@@ -152,6 +152,48 @@ func (m *Module) Execute(action string, payload map[string]interface{}) (bool, s
 		}
 		return true, "ok"
 
+	case "create_set":
+		name, _ := payload["name"].(string)
+		if name == "" {
+			return false, "missing name"
+		}
+		if err := m.drv.CreateSet(name); err != nil {
+			return false, err.Error()
+		}
+		return true, "ok"
+
+	case "delete_set":
+		name, _ := payload["name"].(string)
+		if name == "" {
+			return false, "missing name"
+		}
+		if err := m.drv.DeleteSet(name); err != nil {
+			return false, err.Error()
+		}
+		return true, "ok"
+
+	case "set_add":
+		name, _ := payload["name"].(string)
+		addr, _ := payload["address"].(string)
+		if name == "" || addr == "" {
+			return false, "missing name or address"
+		}
+		if err := m.drv.AddSetMember(name, addr); err != nil {
+			return false, err.Error()
+		}
+		return true, "ok"
+
+	case "set_remove":
+		name, _ := payload["name"].(string)
+		addr, _ := payload["address"].(string)
+		if name == "" || addr == "" {
+			return false, "missing name or address"
+		}
+		if err := m.drv.RemoveSetMember(name, addr); err != nil {
+			return false, err.Error()
+		}
+		return true, "ok"
+
 	case "cleanup_unmanaged":
 		// Reconcile action triggered by the overwrite drift policy.
 		// Removes every managed-area rule whose BMW-ID is not in keep_ids.

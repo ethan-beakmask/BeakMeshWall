@@ -90,8 +90,14 @@ func translate(rule driver.SchemaRule) (chain string, ruleArgs [][]string, err e
 	if notAny(src) {
 		matchArgs = append(matchArgs, "-s", src)
 	}
+	if rule.SrcSet != "" {
+		matchArgs = append(matchArgs, "-m", "set", "--match-set", "BMW-"+rule.SrcSet, "src")
+	}
 	if notAny(dst) {
 		matchArgs = append(matchArgs, "-d", dst)
+	}
+	if rule.DstSet != "" {
+		matchArgs = append(matchArgs, "-m", "set", "--match-set", "BMW-"+rule.DstSet, "dst")
 	}
 	if proto != "any" {
 		matchArgs = append(matchArgs, "-p", proto)
@@ -109,6 +115,23 @@ func translate(rule driver.SchemaRule) (chain string, ruleArgs [][]string, err e
 	// Stage B: connection state.
 	if len(rule.State) > 0 {
 		matchArgs = append(matchArgs, "-m", "conntrack", "--ctstate", joinStateUpper(rule.State))
+	}
+
+	// Stage C: per-rule rate limit. iptables `-m limit` accepts /second,
+	// /minute, /hour, /day; map directly. Burst defaults to limit's own default
+	// when not specified.
+	if rule.RateLimit != nil {
+		periodAbbr := map[string]string{
+			"second": "sec", "minute": "min", "hour": "hour", "day": "day",
+		}[rule.RateLimit.Period]
+		if periodAbbr == "" {
+			periodAbbr = rule.RateLimit.Period
+		}
+		matchArgs = append(matchArgs, "-m", "limit",
+			"--limit", fmt.Sprintf("%d/%s", rule.RateLimit.Count, periodAbbr))
+		if rule.RateLimit.Burst > 0 {
+			matchArgs = append(matchArgs, "--limit-burst", fmt.Sprint(rule.RateLimit.Burst))
+		}
 	}
 
 	// Common comment carries BMW-ID for both log and action rules.

@@ -11,6 +11,7 @@ from app.models.node import Node
 from app.models.task import Task
 from app.models.threat_block import ThreatBlock
 from app.models.threat_whitelist import ThreatWhitelist
+from app.models.named_set import NamedSet
 from app.services.edl_export import export_blocklist, export_whitelist
 from app.services.rule_validator import RuleValidationError, validate_rule
 
@@ -165,6 +166,19 @@ def create_apply_rule_task():
         normalized = validate_rule(rule, node.fw_driver)
     except RuleValidationError as e:
         return jsonify({"error": str(e), "driver": node.fw_driver}), 400
+
+    # Stage C: rules referencing a named set must point at one that exists
+    # on this node, otherwise the agent will fail at apply time and we'll
+    # waste a round-trip + a drift event.
+    for set_field in ("src_set", "dst_set"):
+        set_name = normalized.get(set_field)
+        if not set_name:
+            continue
+        if not NamedSet.query.filter_by(node_id=node.id, name=set_name).first():
+            return jsonify({
+                "error": f"{set_field} '{set_name}' does not exist on this node; "
+                         f"create it via /api/v1/sets/create first",
+            }), 409
 
     task = Task(
         node_id=node.id,

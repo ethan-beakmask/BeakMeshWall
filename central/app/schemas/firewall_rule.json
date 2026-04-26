@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://beakmeshwall.local/schemas/firewall_rule.json",
-  "title": "BeakMeshWall Firewall Rule (Stage A+B)",
-  "description": "Unified firewall rule schema. Stage A: basic 5-tuple. Stage B adds connection state matching and logging. Translated to native syntax (nftables/iptables/Windows Firewall) by agent driver. See docs/ROADMAP-CONFIG-MANAGEMENT.md.",
+  "title": "BeakMeshWall Firewall Rule (Stage A+B+C)",
+  "description": "Unified firewall rule schema. A: 5-tuple. B: state + log. C: rate limit + named set references. Translated to native syntax (nftables/iptables/Windows Firewall) by agent driver. See docs/ROADMAP-CONFIG-MANAGEMENT.md.",
   "type": "object",
   "required": ["action", "direction"],
   "additionalProperties": false,
   "properties": {
     "stage": {
       "type": "string",
-      "enum": ["A", "B"],
+      "enum": ["A", "B", "C"],
       "description": "Schema stage tag. Optional; informational only."
     },
     "action": {
@@ -83,6 +83,27 @@
       "enum": ["debug", "info", "notice", "warning", "error"],
       "default": "info",
       "description": "Stage B: log severity."
+    },
+    "rate_limit": {
+      "type": "object",
+      "description": "Stage C: per-rule rate limit. Packets exceeding count/period (with optional burst) are dropped (the verdict still depends on action; rate_limit gates how often the rule fires).",
+      "additionalProperties": false,
+      "required": ["count", "period"],
+      "properties": {
+        "count": {"type": "integer", "minimum": 1},
+        "period": {"type": "string", "enum": ["second", "minute", "hour", "day"]},
+        "burst": {"type": "integer", "minimum": 0, "default": 0}
+      }
+    },
+    "src_set": {
+      "type": "string",
+      "description": "Stage C: name of a named set to match source IP against. Set must already exist on the target node (managed via /api/v1/sets/*).",
+      "pattern": "^[a-zA-Z0-9_-]{1,32}$"
+    },
+    "dst_set": {
+      "type": "string",
+      "description": "Stage C: name of a named set to match destination IP against.",
+      "pattern": "^[a-zA-Z0-9_-]{1,32}$"
     }
   }
 }

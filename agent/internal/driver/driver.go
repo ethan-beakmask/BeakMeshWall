@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -16,27 +17,40 @@ import (
 // See docs/ROADMAP-CONFIG-MANAGEMENT.md sections 2.3 and 4.1.
 const ManagedComment = "MANAGED BY BeakMeshWall - DO NOT EDIT MANUALLY / 由 BeakMeshWall 管理，請勿手動編輯"
 
-// SchemaRule is the unified Stage A+B firewall rule, translated by each driver
+// SchemaRule is the unified Stage A+B+C firewall rule, translated by each driver
 // into its native syntax (nftables / iptables / Windows Firewall).
 //
 // Stage A fields: Action, Direction, Proto, Src, Dst, Sport, Dport, Comment.
 // Stage B fields: State, LogEnabled, LogPrefix, LogLevel.
+// Stage C fields: RateLimit, SrcSet, DstSet.
 //
 // See docs/ROADMAP-CONFIG-MANAGEMENT.md section 3.1.
 type SchemaRule struct {
-	Stage      string   `json:"stage,omitempty"`
-	Action     string   `json:"action"`              // allow / drop / reject
-	Direction  string   `json:"direction"`           // input / output / forward
-	Proto      string   `json:"proto,omitempty"`     // tcp / udp / icmp / any
-	Src        string   `json:"src,omitempty"`       // IPv4 / CIDR / "any"
-	Dst        string   `json:"dst,omitempty"`       // IPv4 / CIDR / "any"
-	Sport      string   `json:"sport,omitempty"`     // port / "X-Y" / "any"
-	Dport      string   `json:"dport,omitempty"`     // port / "X-Y" / "any"
-	Comment    string   `json:"comment,omitempty"`
-	State      []string `json:"state,omitempty"`      // new / established / related / invalid
-	LogEnabled bool     `json:"log_enabled,omitempty"`
-	LogPrefix  string   `json:"log_prefix,omitempty"`
-	LogLevel   string   `json:"log_level,omitempty"`  // debug / info / notice / warning / error
+	Stage      string     `json:"stage,omitempty"`
+	Action     string     `json:"action"`
+	Direction  string     `json:"direction"`
+	Proto      string     `json:"proto,omitempty"`
+	Src        string     `json:"src,omitempty"`
+	Dst        string     `json:"dst,omitempty"`
+	Sport      string     `json:"sport,omitempty"`
+	Dport      string     `json:"dport,omitempty"`
+	Comment    string     `json:"comment,omitempty"`
+	State      []string   `json:"state,omitempty"`
+	LogEnabled bool       `json:"log_enabled,omitempty"`
+	LogPrefix  string     `json:"log_prefix,omitempty"`
+	LogLevel   string     `json:"log_level,omitempty"`
+	RateLimit  *RateLimit `json:"rate_limit,omitempty"`
+	SrcSet     string     `json:"src_set,omitempty"`
+	DstSet     string     `json:"dst_set,omitempty"`
+}
+
+// RateLimit configures a per-rule rate limit (Stage C). Period must be one
+// of "second", "minute", "hour", "day"; central validates this against the
+// JSON schema before sending.
+type RateLimit struct {
+	Count  int    `json:"count"`
+	Period string `json:"period"`
+	Burst  int    `json:"burst,omitempty"`
 }
 
 // Fingerprint produces a short stable id for a rule. Used to identify
@@ -44,15 +58,19 @@ type SchemaRule struct {
 // Must stay byte-identical to schemas.fingerprint() in Python central.
 //
 // Canonical key order (Go struct declaration order): A, D, P, S, T, SP, DP,
-// ST, LE, LP, LL. Defaults are filled in for omitted fields so logically
-// equivalent rules produce the same id. Comment is excluded.
+// ST, LE, LP, LL, RL, SS, DS. Defaults are filled in for omitted fields so
+// logically equivalent rules produce the same id. Comment is excluded.
 func Fingerprint(rule SchemaRule) string {
 	state := append([]string(nil), rule.State...)
 	sort.Strings(state)
+	rlCanon := ""
+	if rule.RateLimit != nil {
+		rlCanon = fmt.Sprintf("%d/%s/%d", rule.RateLimit.Count, rule.RateLimit.Period, rule.RateLimit.Burst)
+	}
 	canon := struct {
 		A, D, P, S, T, SP, DP, ST string
 		LE                        bool
-		LP, LL                    string
+		LP, LL, RL, SS, DS        string
 	}{
 		A:  rule.Action,
 		D:  rule.Direction,
@@ -65,6 +83,9 @@ func Fingerprint(rule SchemaRule) string {
 		LE: rule.LogEnabled,
 		LP: defaultStr(rule.LogPrefix, "BMW: "),
 		LL: defaultStr(rule.LogLevel, "info"),
+		RL: rlCanon,
+		SS: rule.SrcSet,
+		DS: rule.DstSet,
 	}
 	b, _ := json.Marshal(canon)
 	sum := sha256.Sum256(b)
@@ -147,4 +168,20 @@ type Driver interface {
 	// BMW-ID=<fingerprint>. Used by drift reconcile to evict managed-area
 	// rules that are not in central's expected set. Idempotent.
 	RemoveByFingerprint(fingerprint string) error
+
+	// Stage C named-set operations. Drivers that don't support named sets
+	// (e.g. windows_firewall) return an "unsupported" error.
+
+	// CreateSet creates an empty named IP set in the managed area.
+	// Idempotent: existing set is a no-op.
+	CreateSet(name string) error
+
+	// DeleteSet removes the named set. Idempotent.
+	DeleteSet(name string) error
+
+	// AddSetMember inserts an IP/CIDR into the named set. Idempotent.
+	AddSetMember(name, addr string) error
+
+	// RemoveSetMember removes an IP/CIDR from the named set. Idempotent.
+	RemoveSetMember(name, addr string) error
 }

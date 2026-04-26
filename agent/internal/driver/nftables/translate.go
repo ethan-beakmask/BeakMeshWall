@@ -107,8 +107,14 @@ func translate(rule driver.SchemaRule) (chain, body string, err error) {
 	if notAny(src) {
 		parts = append(parts, "ip saddr "+src)
 	}
+	if rule.SrcSet != "" {
+		parts = append(parts, "ip saddr @"+rule.SrcSet)
+	}
 	if notAny(dst) {
 		parts = append(parts, "ip daddr "+dst)
+	}
+	if rule.DstSet != "" {
+		parts = append(parts, "ip daddr @"+rule.DstSet)
 	}
 	switch proto {
 	case "tcp", "udp":
@@ -126,6 +132,16 @@ func translate(rule driver.SchemaRule) (chain, body string, err error) {
 		}
 	case "icmp":
 		parts = append(parts, "meta l4proto icmp")
+	}
+
+	// Stage C: per-rule rate limit.
+	if rule.RateLimit != nil {
+		burst := ""
+		if rule.RateLimit.Burst > 0 {
+			burst = fmt.Sprintf(" burst %d packets", rule.RateLimit.Burst)
+		}
+		parts = append(parts, fmt.Sprintf("limit rate %d/%s%s",
+			rule.RateLimit.Count, rule.RateLimit.Period, burst))
 	}
 
 	// Stage B: connection state matching.

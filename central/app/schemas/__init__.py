@@ -47,16 +47,20 @@ def nginx_fingerprint(rule: dict) -> str:
 def fingerprint(rule: dict) -> str:
     """Short stable id for a rule, identical to driver.Fingerprint() in Go.
 
-    Canonical key order: A, D, P, S, T, SP, DP, ST, LE, LP, LL. Defaults are
-    inserted for omitted fields so a rule that omits log_enabled produces
-    the same id as one that sets log_enabled=false. Comment is excluded so
-    re-comments do not change the id.
+    Canonical key order: A, D, P, S, T, SP, DP, ST, LE, LP, LL, RL, SS, DS.
+    Defaults are inserted for omitted fields so logically equivalent rules
+    produce the same id. Comment is excluded.
 
-    Stage B note: changing this set of fields invalidates all previously
-    computed fingerprints. Coordinate with driver.Fingerprint in Go.
+    Schema-evolution warning: changing this canonical form invalidates all
+    previously computed fingerprints, including any persisted ManagedRule
+    rows. Coordinate with driver.Fingerprint in Go.
     """
     state = rule.get("state") or []
     state_canon = ",".join(sorted(state))
+    rl = rule.get("rate_limit") or {}
+    rl_canon = ""
+    if rl:
+        rl_canon = f"{rl.get('count','')}/{rl.get('period','')}/{rl.get('burst', 0)}"
     canon = {
         "A": rule.get("action", "") or "",
         "D": rule.get("direction", "") or "",
@@ -69,6 +73,9 @@ def fingerprint(rule: dict) -> str:
         "LE": bool(rule.get("log_enabled", False)),
         "LP": rule.get("log_prefix") or "BMW: ",
         "LL": rule.get("log_level") or "info",
+        "RL": rl_canon,
+        "SS": rule.get("src_set") or "",
+        "DS": rule.get("dst_set") or "",
     }
     encoded = json.dumps(canon, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:8]
