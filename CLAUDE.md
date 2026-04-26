@@ -18,6 +18,7 @@
 - Agent pull-based 通訊，不需在受管節點開 inbound port
 - nftables table 所有權: BeakMeshWall 只管 `inet beakmeshwall` table (priority -150)
 - External tables (Docker/LXC) 唯讀觀察，絕不修改
+- 受管子系統組態接管: 完整規則見 `docs/ROADMAP-CONFIG-MANAGEMENT.md`（規範性文件，後續對話必須依循）
 - 判斷邏輯歸來源系統，BeakMeshWall 只負責執行防火牆操作
 
 ## 目錄結構
@@ -31,8 +32,9 @@
 - **P1**: Central API + Local Auth + Agent 註冊/心跳 + mTLS (done)
 - **P2**: nftables Driver + 規則 CRUD + Threat Feed API (done)
 - **P3**: Counters 回報 + External Table 觀察 + Audit Log (done)
-- **P4**: iptables/pf Driver + OIDC 可選對接 (done)
+- **P4**: iptables/pf Driver + OIDC 可選對接 (partial -- OIDC done; iptables/pf 重新規劃至 P6)
 - **P5**: Request Path Topology -- Agent module 化 + nginx/service collector + 三層路徑拓撲 UI (done)
+- **P6**: 統一組態接管（防火牆 schema + 接管控制面 + nginx 納管），規範見 `docs/ROADMAP-CONFIG-MANAGEMENT.md`（規劃中）
 
 ## 開發環境
 - Central: 192.168.0.16
