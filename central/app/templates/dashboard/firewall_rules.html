@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+{% block title %}Firewall Rules - BeakMeshWall{% endblock %}
+{% block content %}
+<div x-data="firewallRules()" x-init="init()">
+  <h4>Firewall Rules <small class="text-muted">- Stage A / B / C</small></h4>
+
+  <!-- Node selector -->
+  <form method="get" class="mt-3">
+    <div class="d-flex align-items-center gap-2">
+      <label class="mb-0" style="font-size:0.85rem;">Node:</label>
+      <select class="form-select form-select-sm" name="node_id" onchange="this.form.submit()" style="max-width:340px">
+        {% for n in nodes %}
+        <option value="{{ n.id }}" {% if selected and selected.id == n.id %}selected{% endif %}>
+          {{ n.hostname }} -- {{ n.fw_driver }} -- {{ n.status }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  {% if not selected %}
+  <div class="alert alert-warning mt-3">No nodes registered. Use the agent to register a node first.</div>
+  {% else %}
+
+  <div class="mt-2" x-show="msg" x-text="msg" :class="msgOk ? 'text-success' : 'text-danger'" style="font-size:0.85rem;"></div>
+
+  <!-- ============ Rule build form ============ -->
+  <div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <strong>Build a Rule</strong>
+      <span style="font-size:0.8rem; color:#6c757d;">target driver: <code>{{ selected.fw_driver }}</code></span>
+    </div>
+    <div class="card-body">
+      <!-- Stage A row -->
+      <div class="row g-2 align-items-end">
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:0.8rem;">Action *</label>
+          <select class="form-select form-select-sm" x-model="r.action">
+            <option value="allow">allow</option>
+            <option value="drop">drop</option>
+            <option value="reject">reject</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:0.8rem;">Direction *</label>
+          <select class="form-select form-select-sm" x-model="r.direction">
+            <option value="input">input</option>
+            <option value="output">output</option>
+            <option value="forward">forward</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:0.8rem;">Proto</label>
+          <select class="form-select form-select-sm" x-model="r.proto">
+            <option value="any">any</option>
+            <option value="tcp">tcp</option>
+            <option value="udp">udp</option>
+            <option value="icmp">icmp</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label" style="font-size:0.8rem;">Src (IP / CIDR / any)</label>
+          <input type="text" class="form-control form-control-sm" x-model="r.src" placeholder="any">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label" style="font-size:0.8rem;">Dst</label>
+          <input type="text" class="form-control form-control-sm" x-model="r.dst" placeholder="any">
+        </div>
+      </div>
+      <div class="row g-2 align-items-end mt-1">
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:0.8rem;">Sport</label>
+          <input type="text" class="form-control form-control-sm" x-model="r.sport" placeholder="any">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:0.8rem;">Dport</label>
+          <input type="text" class="form-control form-control-sm" x-model="r.dport" placeholder="any">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label" style="font-size:0.8rem;">Comment</label>
+          <input type="text" class="form-control form-control-sm" x-model="r.comment" placeholder="optional human note">
+        </div>
+      </div>
+
+      <!-- Stage B section -->
+      <div class="mt-3 pt-2" style="border-top:1px solid #dee2e6;">
+        <a href="#" class="text-decoration-none" style="font-size:0.85rem;" @click.prevent="showB = !showB">
+          <span x-text="showB ? '▼' : '▶'"></span> Stage B: state + log
+        </a>
+        <div x-show="showB" class="row g-2 align-items-end mt-2">
+          <div class="col-md-4">
+            <label class="form-label" style="font-size:0.8rem;">State (multi-select)</label>
+            <div>
+              <template x-for="s in ['new','established','related','invalid']" :key="s">
+                <label class="me-3" style="font-size:0.85rem;">
+                  <input type="checkbox" :value="s" x-model="r.state"> <span x-text="s"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" style="font-size:0.8rem;">Log</label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" x-model="r.log_enabled">
+              <label class="form-check-label" style="font-size:0.85rem;">Enabled</label>
+            </div>
+          </div>
+          <div class="col-md-3" x-show="r.log_enabled">
+            <label class="form-label" style="font-size:0.8rem;">Log Prefix</label>
+            <input type="text" class="form-control form-control-sm" x-model="r.log_prefix" placeholder="BMW: ">
+          </div>
+          <div class="col-md-3" x-show="r.log_enabled">
+            <label class="form-label" style="font-size:0.8rem;">Log Level</label>
+            <select class="form-select form-select-sm" x-model="r.log_level">
+              <option value="debug">debug</option>
+              <option value="info">info</option>
+              <option value="notice">notice</option>
+              <option value="warning">warning</option>
+              <option value="error">error</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage C section -->
+      <div class="mt-2 pt-2" style="border-top:1px solid #dee2e6;">
+        <a href="#" class="text-decoration-none" style="font-size:0.85rem;" @click.prevent="showC = !showC">
+          <span x-text="showC ? '▼' : '▶'"></span> Stage C: rate limit + named sets
+        </a>
+        <div x-show="showC" class="row g-2 align-items-end mt-2">
+          <div class="col-md-2">
+            <label class="form-label" style="font-size:0.8rem;">Rate Count</label>
+            <input type="number" class="form-control form-control-sm" x-model.number="r.rate_count" placeholder="0 = off" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" style="font-size:0.8rem;">Rate Period</label>
+            <select class="form-select form-select-sm" x-model="r.rate_period">
+              <option value="second">second</option>
+              <option value="minute">minute</option>
+              <option value="hour">hour</option>
+              <option value="day">day</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label" style="font-size:0.8rem;">Burst</label>
+            <input type="number" class="form-control form-control-sm" x-model.number="r.rate_burst" placeholder="0" min="0">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" style="font-size:0.8rem;">Src Set</label>
+            <input type="text" class="form-control form-control-sm" x-model="r.src_set" placeholder="set name">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" style="font-size:0.8rem;">Dst Set</label>
+            <input type="text" class="form-control form-control-sm" x-model="r.dst_set" placeholder="set name">
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" @click="dryRun()" :disabled="busy">
+          <span x-show="!busy">Validate (dry-run)</span>
+          <span x-show="busy" class="spinner-border spinner-border-sm"></span>
+        </button>
+        <button class="btn btn-sm btn-primary" @click="apply()" :disabled="busy">
+          <span x-show="!busy">Apply to node</span>
+          <span x-show="busy" class="spinner-border spinner-border-sm"></span>
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" @click="resetForm()">Reset</button>
+      </div>
+      <div class="mt-2" x-show="preview" style="font-size:0.78rem;">
+        <strong>Normalized:</strong> <code x-text="preview"></code>
+        <span x-show="previewFp"> &nbsp; <strong>BMW-ID:</strong> <code x-text="previewFp"></code></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Rule list ============ -->
+  <div class="card mt-3">
+    <div class="card-header"><strong>Active Rules ({{ rules|length }})</strong></div>
+    <div class="card-body p-0">
+      {% if rules %}
+      <table class="table table-sm table-hover mb-0">
+        <thead>
+          <tr>
+            <th>BMW-ID</th>
+            <th>Action</th>
+            <th>Dir</th>
+            <th>Proto</th>
+            <th>Src</th>
+            <th>Dst</th>
+            <th>Sport</th>
+            <th>Dport</th>
+            <th>State</th>
+            <th>Log</th>
+            <th>Rate</th>
+            <th>Set</th>
+            <th>Comment</th>
+            <th>Applied</th>
+            <th style="width:80px">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in rules %}
+          {% set rl = entry.rule %}
+          <tr>
+            <td><code style="font-size:0.75rem;">{{ entry.fingerprint }}</code></td>
+            <td>{{ rl.action }}</td>
+            <td>{{ rl.direction }}</td>
+            <td>{{ rl.proto or 'any' }}</td>
+            <td>{{ rl.src or 'any' }}</td>
+            <td>{{ rl.dst or 'any' }}</td>
+            <td>{{ rl.sport or 'any' }}</td>
+            <td>{{ rl.dport or 'any' }}</td>
+            <td>{{ (rl.state or [])|join(',') }}</td>
+            <td>{% if rl.log_enabled %}{{ rl.log_level or 'info' }}{% endif %}</td>
+            <td>
+              {% if rl.rate_limit %}{{ rl.rate_limit.count }}/{{ rl.rate_limit.period }}{% if rl.rate_limit.burst %}+{{ rl.rate_limit.burst }}{% endif %}{% endif %}
+            </td>
+            <td>
+              {% if rl.src_set %}s:{{ rl.src_set }}{% endif %}
+              {% if rl.dst_set %}d:{{ rl.dst_set }}{% endif %}
+            </td>
+            <td style="font-size:0.78rem;">{{ rl.comment or '' }}</td>
+            <td style="font-size:0.78rem;">{{ entry.applied_at[:19] if entry.applied_at else '' }}</td>
+            <td>
+              <button class="btn btn-sm btn-outline-danger" style="font-size:0.75rem;"
+                      @click="removeRule({{ entry.rule|tojson }})" :disabled="busy">Remove</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="p-3 text-muted">No active managed rules on this node.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% endif %}
+</div>
+
+<script>
+function firewallRules() {
+  return {
+    nodeId: {{ selected.id if selected else 'null' }},
+    driver: '{{ selected.fw_driver if selected else "" }}',
+    busy: false,
+    msg: '',
+    msgOk: false,
+    preview: '',
+    previewFp: '',
+    showB: false,
+    showC: false,
+    r: {},
+    init() { this.resetForm(); },
+    resetForm() {
+      this.r = {
+        action: 'drop', direction: 'input',
+        proto: 'any', src: 'any', dst: 'any', sport: 'any', dport: 'any',
+        comment: '',
+        state: [], log_enabled: false, log_prefix: 'BMW: ', log_level: 'info',
+        rate_count: 0, rate_period: 'second', rate_burst: 0,
+        src_set: '', dst_set: '',
+      };
+      this.preview = ''; this.previewFp = ''; this.msg = '';
+    },
+    buildRule() {
+      const out = {
+        action: this.r.action,
+        direction: this.r.direction,
+      };
+      if (this.r.proto && this.r.proto !== 'any') out.proto = this.r.proto;
+      if (this.r.src && this.r.src !== 'any') out.src = this.r.src;
+      if (this.r.dst && this.r.dst !== 'any') out.dst = this.r.dst;
+      if (this.r.sport && this.r.sport !== 'any') out.sport = this.r.sport;
+      if (this.r.dport && this.r.dport !== 'any') out.dport = this.r.dport;
+      if (this.r.comment) out.comment = this.r.comment;
+      if (this.r.state && this.r.state.length) out.state = this.r.state;
+      if (this.r.log_enabled) {
+        out.log_enabled = true;
+        if (this.r.log_prefix) out.log_prefix = this.r.log_prefix;
+        if (this.r.log_level) out.log_level = this.r.log_level;
+      }
+      if (this.r.rate_count > 0) {
+        out.rate_limit = { count: this.r.rate_count, period: this.r.rate_period, burst: this.r.rate_burst || 0 };
+      }
+      if (this.r.src_set) out.src_set = this.r.src_set;
+      if (this.r.dst_set) out.dst_set = this.r.dst_set;
+      return out;
+    },
+    async dryRun() {
+      this.busy = true; this.msg = '';
+      try {
+        const resp = await fetch('/api/v1/rules/validate', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ driver: this.driver, rule: this.buildRule() }),
+        });
+        const data = await resp.json();
+        if (data.valid) {
+          this.preview = JSON.stringify(data.normalized);
+          this.previewFp = '';
+          this.msgOk = true; this.msg = 'Valid for driver ' + this.driver;
+        } else {
+          this.preview = ''; this.previewFp = '';
+          this.msgOk = false; this.msg = data.error || 'invalid';
+        }
+      } catch (e) {
+        this.msgOk = false; this.msg = 'request failed: ' + e;
+      } finally { this.busy = false; }
+    },
+    async apply() {
+      if (!confirm('Apply this rule to ' + '{{ selected.hostname if selected else "" }}' + '?')) return;
+      this.busy = true; this.msg = '';
+      try {
+        const resp = await fetch('/api/v1/rules/apply', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ node_id: this.nodeId, rule: this.buildRule() }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.msgOk = true; this.msg = 'Task ' + data.task_id + ' queued; BMW-ID = ' + (data.normalized_rule ? '' : '');
+          setTimeout(() => location.reload(), 800);
+        } else {
+          this.msgOk = false; this.msg = data.error || ('HTTP ' + resp.status);
+        }
+      } catch (e) {
+        this.msgOk = false; this.msg = 'request failed: ' + e;
+      } finally { this.busy = false; }
+    },
+    async removeRule(rule) {
+      if (!confirm('Send remove_rule task for this rule?')) return;
+      this.busy = true; this.msg = '';
+      try {
+        // use rule body so central can re-fingerprint and locate.
+        // We model as POST /api/v1/rules/apply  with action="remove" -- but
+        // we don't have that endpoint; instead, dispatch a remove_rule task
+        // through a side endpoint. For now, reuse apply but with tag.
+        // Simpler: call the threat unblock if it's a single-IP block, otherwise
+        // we need a dedicated remove endpoint. We add /rules/remove next.
+        const resp = await fetch('/api/v1/rules/remove', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ node_id: this.nodeId, rule: rule }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.msgOk = true; this.msg = 'Task ' + data.task_id + ' queued';
+          setTimeout(() => location.reload(), 800);
+        } else {
+          this.msgOk = false; this.msg = data.error || ('HTTP ' + resp.status);
+        }
+      } catch (e) {
+        this.msgOk = false; this.msg = 'request failed: ' + e;
+      } finally { this.busy = false; }
+    },
+  };
+}
+</script>
+{% endblock %}

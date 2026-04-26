@@ -25,7 +25,12 @@
       <a href="{{ url_for('dashboard.nodes') }}" class="{% if request.endpoint == 'dashboard.nodes' %}active{% endif %}">Nodes</a>
       <a href="{{ url_for('dashboard.topology_graph') }}" class="{% if request.endpoint == 'dashboard.topology_graph' %}active{% endif %}">Topology Graph</a>
       <a href="{{ url_for('dashboard.threat_control') }}" class="{% if request.endpoint == 'dashboard.threat_control' %}active{% endif %}">Threat Control</a>
-      <a href="{{ url_for('dashboard.help_page') }}" class="{% if request.endpoint == 'dashboard.help_page' %}active{% endif %}">Help</a>
+      <div style="padding: 4px 16px; font-size: 0.7rem; color: #6c757d; margin-top: 8px; text-transform: uppercase;">Policy (P6)</div>
+      <a href="{{ url_for('dashboard.firewall_rules') }}" class="{% if request.endpoint == 'dashboard.firewall_rules' %}active{% endif %}">Firewall Rules</a>
+      <a href="{{ url_for('dashboard.nginx_rules') }}" class="{% if request.endpoint == 'dashboard.nginx_rules' %}active{% endif %}">Nginx Rules</a>
+      <a href="{{ url_for('dashboard.named_sets') }}" class="{% if request.endpoint == 'dashboard.named_sets' %}active{% endif %}">Named Sets</a>
+      <a href="{{ url_for('dashboard.drift') }}" class="{% if request.endpoint == 'dashboard.drift' %}active{% endif %}">Drift Events</a>
+      <a href="{{ url_for('dashboard.help_page') }}" class="{% if request.endpoint == 'dashboard.help_page' %}active{% endif %}" style="margin-top: 8px;">Help</a>
       <div class="mt-auto" style="border-top: 1px solid #343a40;">
         <div class="lang-switch" onclick="toggleLang()">
           <span id="lang-label"></span>

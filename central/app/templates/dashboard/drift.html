@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Drift Events - BeakMeshWall{% endblock %}
+{% block content %}
+<div x-data="driftPage()">
+  <h4>Drift Events <small class="text-muted">- recent 100 (per-node policy in panel below)</small></h4>
+
+  <div class="mt-2" x-show="msg" x-text="msg" :class="msgOk ? 'text-success' : 'text-danger'" style="font-size:0.85rem;"></div>
+
+  <!-- Events table -->
+  <div class="card mt-3">
+    <div class="card-header"><strong>Events ({{ events|length }})</strong></div>
+    <div class="card-body p-0">
+      {% if events %}
+      <table class="table table-sm table-hover mb-0">
+        <thead>
+          <tr>
+            <th>Detected</th>
+            <th>Node</th>
+            <th>Subsystem</th>
+            <th>Policy</th>
+            <th>Notify</th>
+            <th>Missing</th>
+            <th>Extra</th>
+            <th>Backup</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in events %}
+          <tr>
+            <td style="font-size:0.78rem;">{{ e.detected_at[:19] }}</td>
+            <td>{{ e.hostname }}</td>
+            <td>
+              {% if e.subsystem == 'firewall' %}
+              <span class="badge bg-primary">firewall</span>
+              {% else %}
+              <span class="badge bg-info text-dark">{{ e.subsystem }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if e.policy == 'overwrite' %}
+              <span class="badge bg-warning text-dark">{{ e.policy }}</span>
+              {% elif e.policy == 'notify' %}
+              <span class="badge bg-secondary">{{ e.policy }}</span>
+              {% else %}
+              <span class="badge bg-light text-dark">{{ e.policy }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if e.notification_sent %}
+              <span class="text-success">sent</span>
+              {% else %}
+              <span class="text-muted">-</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if e.missing %}
+                <span class="badge bg-danger">{{ e.missing|length }}</span>
+                <span style="font-size:0.78rem;">
+                  {% for fp in e.missing[:3] %}<code>{{ fp }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+                  {% if e.missing|length > 3 %}+{{ e.missing|length - 3 }}{% endif %}
+                </span>
+              {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td>
+              {% if e.extra %}
+                <span class="badge bg-warning text-dark">{{ e.extra|length }}</span>
+                <span style="font-size:0.78rem;">
+                  {% for fp in e.extra[:3] %}<code>{{ fp }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+                  {% if e.extra|length > 3 %}+{{ e.extra|length - 3 }}{% endif %}
+                </span>
+              {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td style="font-size:0.78rem;">
+              {% if e.backup_path %}<code>{{ e.backup_path }}</code>{% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="p-3 text-muted">No drift events recorded.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Per-node policy -->
+  <div class="card mt-4">
+    <div class="card-header"><strong>Per-node Drift Policy</strong></div>
+    <div class="card-body p-0">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th>Node</th>
+            <th>fw_driver</th>
+            <th>nginx</th>
+            <th>firewall policy</th>
+            <th>nginx policy</th>
+            <th>check interval (sec)</th>
+            <th style="width:90px">Save</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in policies %}
+          <tr x-data="{
+                fwPolicy: '{{ p.policy_firewall }}',
+                ngxPolicy: '{{ p.policy_nginx }}',
+                interval: {{ p.drift_check_interval if p.drift_check_interval is not none else 'null' }},
+              }">
+            <td>{{ p.hostname }}</td>
+            <td><code style="font-size:0.78rem;">{{ p.fw_driver }}</code></td>
+            <td>
+              {% if p.nginx_managed %}<span class="badge bg-success">on</span>
+              {% else %}<span class="badge bg-secondary">off</span>{% endif %}
+            </td>
+            <td>
+              <select class="form-select form-select-sm" x-model="fwPolicy" style="width:140px">
+                <option value="detect-only">detect-only</option>
+                <option value="notify">notify</option>
+                <option value="overwrite">overwrite</option>
+              </select>
+            </td>
+            <td>
+              <select class="form-select form-select-sm" x-model="ngxPolicy" style="width:140px">
+                <option value="detect-only">detect-only</option>
+                <option value="notify">notify</option>
+                <option value="overwrite">overwrite</option>
+              </select>
+            </td>
+            <td>
+              <input type="number" class="form-control form-control-sm" x-model.number="interval" placeholder="default 300" min="60" max="3600" style="width:120px">
+            </td>
+            <td>
+              <button class="btn btn-sm btn-primary"
+                      @click="savePolicy({{ p.id }}, fwPolicy, ngxPolicy, interval)" :disabled="busy">
+                Save
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function driftPage() {
+  return {
+    busy: false, msg: '', msgOk: false,
+    async savePolicy(nodeId, fwPolicy, ngxPolicy, interval) {
+      this.busy = true; this.msg = '';
+      try {
+        const body = { policies: { firewall: fwPolicy, nginx: ngxPolicy } };
+        if (interval === '' || interval === null || interval === undefined) {
+          body.check_interval = null;
+        } else if (typeof interval === 'number' && interval >= 60 && interval <= 3600) {
+          body.check_interval = interval;
+        }
+        const resp = await fetch('/api/v1/web/node/' + nodeId + '/drift-policy', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.msgOk = true; this.msg = 'Saved policies for node ' + nodeId;
+        } else {
+          this.msgOk = false; this.msg = data.error || ('HTTP ' + resp.status);
+        }
+      } catch (e) { this.msgOk = false; this.msg = e + ''; }
+      finally { this.busy = false; }
+    },
+  };
+}
+</script>
+{% endblock %}

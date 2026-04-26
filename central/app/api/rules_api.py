@@ -196,6 +196,42 @@ def create_apply_rule_task():
     }), 201
 
 
+@api_bp.route("/rules/remove", methods=["POST"])
+@login_required
+def create_remove_rule_task():
+    """Send a remove_rule task for a previously applied schema rule.
+
+    Body: {"node_id": int, "rule": {schema...}}.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    node_id = data.get("node_id")
+    rule = data.get("rule")
+    if not node_id or not isinstance(rule, dict):
+        return jsonify({"error": "node_id and rule (object) are required"}), 400
+
+    node = db.session.get(Node, node_id)
+    if not node:
+        return jsonify({"error": "node not found"}), 404
+
+    try:
+        normalized = validate_rule(rule, node.fw_driver)
+    except RuleValidationError as e:
+        return jsonify({"error": str(e), "driver": node.fw_driver}), 400
+
+    task = Task(
+        node_id=node.id,
+        action="remove_rule",
+        payload=json.dumps({"rule": normalized}),
+        created_by=current_user.username,
+    )
+    db.session.add(task)
+    db.session.commit()
+    return jsonify({"task_id": task.id, "status": "pending"}), 201
+
+
 @api_bp.route("/rules/validate", methods=["POST"])
 @login_required
 def validate_rule_endpoint():
@@ -437,6 +473,46 @@ def web_whitelist_add():
     db.session.commit()
     export_whitelist()
     return jsonify({"status": "created", "id": entry.id, "ip_cidr": entry.ip_cidr}), 201
+
+
+@api_bp.route("/web/node/<int:node_id>/drift-policy", methods=["POST"])
+@login_required
+def web_set_drift_policy(node_id):
+    """Update per-node drift policy. Body may contain:
+      { "policies": {"firewall": "notify"|"overwrite"|"detect-only", "nginx": ...} }
+      { "check_interval": null | int (60..3600) }
+    See docs/ROADMAP-CONFIG-MANAGEMENT.md sections 2.4 and 4.3.
+    """
+    data = request.get_json() or {}
+    node = db.session.get(Node, node_id)
+    if not node:
+        return jsonify({"error": "node not found"}), 404
+
+    try:
+        cur = json.loads(node.drift_policies or "{}")
+    except (TypeError, ValueError):
+        cur = {}
+    valid = {"detect-only", "notify", "overwrite"}
+    for k, v in (data.get("policies") or {}).items():
+        if k in ("firewall", "nginx") and v in valid:
+            cur[k] = v
+    node.drift_policies = json.dumps(cur)
+
+    if "check_interval" in data:
+        ci = data["check_interval"]
+        if ci is None:
+            node.drift_check_interval = None
+        elif isinstance(ci, int) and 60 <= ci <= 3600:
+            node.drift_check_interval = ci
+        else:
+            return jsonify({"error": "check_interval must be null or 60..3600"}), 400
+
+    db.session.commit()
+    return jsonify({
+        "node_id": node_id,
+        "drift_policies": cur,
+        "check_interval": node.drift_check_interval,
+    })
 
 
 @api_bp.route("/web/threat/whitelist/<int:entry_id>", methods=["DELETE"])
