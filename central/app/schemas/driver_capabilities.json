@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beakmeshwall.local/schemas/driver_capabilities.json",
+  "title": "BeakMeshWall Driver Capability Map",
+  "description": "Per-driver capability map. Lists which schema fields and which enum values each driver supports. Central uses this to validate that a rule can be deployed to a target node before sending. See docs/ROADMAP-CONFIG-MANAGEMENT.md section 3.4.",
+  "version": "stage-A",
+  "drivers": {
+    "nftables": {
+      "stage": "A",
+      "fields": {
+        "action": {"supported": true, "values": ["allow", "drop", "reject"]},
+        "direction": {"supported": true, "values": ["input", "output", "forward"]},
+        "proto": {"supported": true, "values": ["tcp", "udp", "icmp", "any"]},
+        "src": {"supported": true},
+        "dst": {"supported": true},
+        "sport": {"supported": true},
+        "dport": {"supported": true},
+        "comment": {"supported": true}
+      }
+    },
+    "iptables": {
+      "stage": "A",
+      "fields": {
+        "action": {"supported": true, "values": ["allow", "drop", "reject"]},
+        "direction": {"supported": true, "values": ["input", "output", "forward"]},
+        "proto": {"supported": true, "values": ["tcp", "udp", "icmp", "any"]},
+        "src": {"supported": true},
+        "dst": {"supported": true},
+        "sport": {"supported": true},
+        "dport": {"supported": true},
+        "comment": {"supported": true}
+      }
+    },
+    "windows_firewall": {
+      "stage": "A",
+      "frozen_at_stage": "A",
+      "frozen_reason": "No native rate limit, no ipset equivalent, divergent stateful semantics. Locked at stage A per docs/ROADMAP-CONFIG-MANAGEMENT.md section 7 item 4.",
+      "fields": {
+        "action": {
+          "supported": true,
+          "values": ["allow", "drop"],
+          "unsupported_values": {
+            "reject": "Windows Firewall has no reject action; only Allow/Block. Use action=drop instead."
+          }
+        },
+        "direction": {
+          "supported": true,
+          "values": ["input", "output"],
+          "unsupported_values": {
+            "forward": "Windows endpoint hosts do not route traffic; forward chain has no equivalent."
+          }
+        },
+        "proto": {"supported": true, "values": ["tcp", "udp", "icmp", "any"]},
+        "src": {"supported": true},
+        "dst": {"supported": true},
+        "sport": {"supported": true},
+        "dport": {"supported": true},
+        "comment": {"supported": true}
+      }
+    }
+  }
+}

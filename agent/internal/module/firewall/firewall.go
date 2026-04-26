@@ -2,6 +2,7 @@
 package firewall
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/anthropics/beakmeshwall-agent/internal/driver"
@@ -77,7 +78,49 @@ func (m *Module) Execute(action string, payload map[string]interface{}) (bool, s
 		}
 		return true, "ok"
 
+	case "apply_rule":
+		rule, err := decodeSchemaRule(payload)
+		if err != nil {
+			return false, err.Error()
+		}
+		if err := m.drv.ApplyRule(rule); err != nil {
+			return false, err.Error()
+		}
+		return true, "ok"
+
+	case "remove_rule":
+		rule, err := decodeSchemaRule(payload)
+		if err != nil {
+			return false, err.Error()
+		}
+		if err := m.drv.RemoveRule(rule); err != nil {
+			return false, err.Error()
+		}
+		return true, "ok"
+
 	default:
 		return false, fmt.Sprintf("unknown firewall action: %s", action)
 	}
+}
+
+// decodeSchemaRule extracts the "rule" sub-object from a payload and
+// unmarshals it into driver.SchemaRule. The payload comes from JSON, so the
+// "rule" value is a map[string]interface{} we re-serialize into the typed struct.
+func decodeSchemaRule(payload map[string]interface{}) (driver.SchemaRule, error) {
+	raw, ok := payload["rule"]
+	if !ok {
+		return driver.SchemaRule{}, fmt.Errorf("missing rule")
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return driver.SchemaRule{}, fmt.Errorf("encode rule: %w", err)
+	}
+	var rule driver.SchemaRule
+	if err := json.Unmarshal(b, &rule); err != nil {
+		return driver.SchemaRule{}, fmt.Errorf("decode rule: %w", err)
+	}
+	if rule.Action == "" || rule.Direction == "" {
+		return driver.SchemaRule{}, fmt.Errorf("rule missing required action/direction")
+	}
+	return rule, nil
 }

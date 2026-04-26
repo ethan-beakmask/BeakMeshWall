@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beakmeshwall.local/schemas/firewall_rule.json",
+  "title": "BeakMeshWall Firewall Rule (Stage A)",
+  "description": "Unified firewall rule schema. Stage A covers basic 5-tuple matching (action/direction/proto/src/dst/sport/dport/comment). Translated to native syntax (nftables/iptables/Windows Firewall) by agent driver. See docs/ROADMAP-CONFIG-MANAGEMENT.md.",
+  "type": "object",
+  "required": ["action", "direction"],
+  "additionalProperties": false,
+  "properties": {
+    "stage": {
+      "type": "string",
+      "enum": ["A"],
+      "description": "Schema stage. Stage B/C will extend this."
+    },
+    "action": {
+      "type": "string",
+      "enum": ["allow", "drop", "reject"],
+      "description": "What to do with matching packets."
+    },
+    "direction": {
+      "type": "string",
+      "enum": ["input", "output", "forward"],
+      "description": "Traffic direction relative to the host."
+    },
+    "proto": {
+      "type": "string",
+      "enum": ["tcp", "udp", "icmp", "any"],
+      "default": "any",
+      "description": "Protocol. 'any' matches all."
+    },
+    "src": {
+      "type": "string",
+      "default": "any",
+      "description": "Source: IPv4 address, CIDR, or 'any'.",
+      "pattern": "^(any|((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(/(3[0-2]|[12]?[0-9]))?)$"
+    },
+    "dst": {
+      "type": "string",
+      "default": "any",
+      "description": "Destination: IPv4 address, CIDR, or 'any'.",
+      "pattern": "^(any|((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(/(3[0-2]|[12]?[0-9]))?)$"
+    },
+    "sport": {
+      "type": "string",
+      "default": "any",
+      "description": "Source port: integer (1-65535), 'X-Y' range, or 'any'.",
+      "pattern": "^(any|[1-9][0-9]{0,4}(-[1-9][0-9]{0,4})?)$"
+    },
+    "dport": {
+      "type": "string",
+      "default": "any",
+      "description": "Destination port: integer (1-65535), 'X-Y' range, or 'any'.",
+      "pattern": "^(any|[1-9][0-9]{0,4}(-[1-9][0-9]{0,4})?)$"
+    },
+    "comment": {
+      "type": "string",
+      "maxLength": 255,
+      "description": "Free-form note. Will be embedded in native rule comment field where supported."
+    }
+  }
+}

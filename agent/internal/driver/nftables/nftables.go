@@ -41,15 +41,21 @@ func New(tableName string) *NFTDriver {
 }
 
 func (d *NFTDriver) Init() error {
-	// Create table if not exists
+	// Create table and the three Stage A chains (input/output/forward).
+	// All chains share priority chainPriority (-150) so we sit before
+	// most other tools while still leaving room for stricter overrides.
 	cmds := []string{
 		fmt.Sprintf("add table %s %s", d.family, d.table),
-		fmt.Sprintf("add chain %s %s %s { type filter hook input priority %d ; policy accept ; }",
-			d.family, d.table, defaultChain, chainPriority),
+		fmt.Sprintf("add chain %s %s filter_input { type filter hook input priority %d ; policy accept ; }",
+			d.family, d.table, chainPriority),
+		fmt.Sprintf("add chain %s %s filter_output { type filter hook output priority %d ; policy accept ; }",
+			d.family, d.table, chainPriority),
+		fmt.Sprintf("add chain %s %s filter_forward { type filter hook forward priority %d ; policy accept ; }",
+			d.family, d.table, chainPriority),
 	}
 	for _, cmd := range cmds {
 		if err := d.nft(cmd); err != nil {
-			// Ignore "already exists" type errors
+			// Tolerate re-runs: existing table/chain returns "File exists".
 			if !strings.Contains(err.Error(), "File exists") {
 				return fmt.Errorf("init nft: %w (cmd: %s)", err, cmd)
 			}

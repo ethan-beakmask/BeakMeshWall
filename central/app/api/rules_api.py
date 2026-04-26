@@ -12,6 +12,7 @@ from app.models.task import Task
 from app.models.threat_block import ThreatBlock
 from app.models.threat_whitelist import ThreatWhitelist
 from app.services.edl_export import export_blocklist, export_whitelist
+from app.services.rule_validator import RuleValidationError, validate_rule
 
 
 @api_bp.route("/rules/block", methods=["POST"])
@@ -136,6 +137,74 @@ def create_delete_rule_task():
     db.session.commit()
 
     return jsonify({"task_id": task.id, "status": "pending"}), 201
+
+
+@api_bp.route("/rules/apply", methods=["POST"])
+@login_required
+def create_apply_rule_task():
+    """Create an apply_rule task using the unified Stage A schema.
+
+    Body: {"node_id": int, "rule": {schema...}}
+    See docs/ROADMAP-CONFIG-MANAGEMENT.md section 3.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    node_id = data.get("node_id")
+    rule = data.get("rule")
+
+    if not node_id or not isinstance(rule, dict):
+        return jsonify({"error": "node_id and rule (object) are required"}), 400
+
+    node = db.session.get(Node, node_id)
+    if not node:
+        return jsonify({"error": "node not found"}), 404
+
+    try:
+        normalized = validate_rule(rule, node.fw_driver)
+    except RuleValidationError as e:
+        return jsonify({"error": str(e), "driver": node.fw_driver}), 400
+
+    task = Task(
+        node_id=node.id,
+        action="apply_rule",
+        payload=json.dumps({"rule": normalized}),
+        created_by=current_user.username,
+    )
+    db.session.add(task)
+    db.session.commit()
+
+    return jsonify({
+        "task_id": task.id,
+        "status": "pending",
+        "normalized_rule": normalized,
+    }), 201
+
+
+@api_bp.route("/rules/validate", methods=["POST"])
+@login_required
+def validate_rule_endpoint():
+    """Dry-run validation. Body: {"driver": str, "rule": {...}}.
+
+    Returns 200 with normalized rule on success, 400 with error otherwise.
+    Does not create any task. Useful for UI preview.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "invalid request"}), 400
+
+    driver = data.get("driver")
+    rule = data.get("rule")
+    if not driver or not isinstance(rule, dict):
+        return jsonify({"error": "driver and rule (object) are required"}), 400
+
+    try:
+        normalized = validate_rule(rule, driver)
+    except RuleValidationError as e:
+        return jsonify({"valid": False, "error": str(e)}), 400
+
+    return jsonify({"valid": True, "normalized": normalized}), 200
 
 
 @api_bp.route("/tasks/<int:node_id>", methods=["GET"])

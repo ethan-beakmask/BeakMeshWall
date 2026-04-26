@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anthropics/beakmeshwall-agent/internal/driver"
+	"github.com/anthropics/beakmeshwall-agent/internal/driver/iptables"
 	"github.com/anthropics/beakmeshwall-agent/internal/driver/nftables"
 )
 
@@ -15,6 +16,8 @@ func New(driverName, tableName string) (*Module, error) {
 	switch driverName {
 	case "nftables", "":
 		drv = nftables.New(tableName)
+	case "iptables":
+		drv = iptables.New()
 	default:
 		return nil, fmt.Errorf("unsupported firewall driver on linux: %s", driverName)
 	}
