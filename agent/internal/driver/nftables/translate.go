@@ -47,22 +47,32 @@ func defaultStr(s, d string) string {
 	return s
 }
 
-// buildComment composes the full comment string written to the nftables rule.
+// buildComment composes the comment string written to the nftables rule.
 //
-// Layout: "<ManagedComment> :: BMW-ID=<fp>[ :: <user-comment>]"
+// nftables hard-caps comment length at 128 bytes. We use the short
+// ManagedTagShort marker plus the BMW-ID, then append (and truncate) the
+// user comment to fit. Full bilingual warning lives in
+// docs/ROADMAP-CONFIG-MANAGEMENT.md and in the table-level documentation;
+// individual rule comments only need to be unambiguously identifiable.
 //
-// The ManagedComment provides the bilingual social-strength warning.
-// BMW-ID lets the agent locate this rule again for RemoveRule and drift checks.
-// User comment is appended at the end if present.
+// Layout: "<ManagedTagShort> :: BMW-ID=<fp>[ :: <user>]"  (<= 128 bytes)
 func buildComment(rule driver.SchemaRule) string {
-	parts := []string{
-		driver.ManagedComment,
-		"BMW-ID=" + driver.Fingerprint(rule),
+	const nftCommentMax = 128
+	prefix := driver.ManagedTagShort + " :: BMW-ID=" + driver.Fingerprint(rule)
+	if rule.Comment == "" {
+		return prefix
 	}
-	if rule.Comment != "" {
-		parts = append(parts, sanitizeComment(rule.Comment))
+	user := sanitizeComment(rule.Comment)
+	full := prefix + " :: " + user
+	if len(full) <= nftCommentMax {
+		return full
 	}
-	return strings.Join(parts, " :: ")
+	// Truncate the user portion so the prefix and BMW-ID are always intact.
+	avail := nftCommentMax - len(prefix) - len(" :: ")
+	if avail <= 0 {
+		return prefix
+	}
+	return prefix + " :: " + user[:avail]
 }
 
 // sanitizeComment escapes characters that would break the nft `comment "..."` syntax.

@@ -179,11 +179,11 @@ func convertPortRange(p string) string {
 }
 
 // buildComment composes the iptables comment string. iptables comments are
-// limited to 256 bytes; we keep the warning + BMW-ID and truncate the user
-// portion if needed.
+// hard-capped at 256 bytes. We use the short ManagedTagShort marker so the
+// behavior matches nftables, then BMW-ID, then user note (truncated to fit).
 func buildComment(rule driver.SchemaRule) string {
 	const maxLen = 250
-	prefix := driver.ManagedComment + " :: BMW-ID=" + driver.Fingerprint(rule)
+	prefix := driver.ManagedTagShort + " :: BMW-ID=" + driver.Fingerprint(rule)
 	if rule.Comment == "" {
 		return prefix
 	}
@@ -191,7 +191,11 @@ func buildComment(rule driver.SchemaRule) string {
 	if len(full) <= maxLen {
 		return full
 	}
-	return full[:maxLen]
+	avail := maxLen - len(prefix) - len(" :: ")
+	if avail <= 0 {
+		return prefix
+	}
+	return prefix + " :: " + rule.Comment[:avail]
 }
 
 // ApplyRule installs a Stage A+B schema rule, idempotent against BMW-ID.

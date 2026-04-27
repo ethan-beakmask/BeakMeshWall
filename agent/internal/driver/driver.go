@@ -10,12 +10,17 @@ import (
 )
 
 
-// ManagedComment is the marker embedded in every BMW-managed rule's comment
-// field. It serves as both the bilingual social-strength warning and the
-// machine-readable tag used by drift detection to identify managed rules.
+// ManagedComment is the full bilingual warning. Use this where the medium
+// has no length limit (nginx config files, Windows Firewall Description,
+// log records, central-side documentation).
 //
 // See docs/ROADMAP-CONFIG-MANAGEMENT.md sections 2.3 and 4.1.
 const ManagedComment = "MANAGED BY BeakMeshWall - DO NOT EDIT MANUALLY / 由 BeakMeshWall 管理，請勿手動編輯"
+
+// ManagedTagShort is the compact warning used inside fixed-width comment
+// fields (notably nftables, where the per-rule comment is hard-capped at
+// 128 bytes). Combined with BMW-ID and a short user note, this fits.
+const ManagedTagShort = "BMW-DO-NOT-EDIT"
 
 // SchemaRule is the unified Stage A+B+C firewall rule, translated by each driver
 // into its native syntax (nftables / iptables / Windows Firewall).

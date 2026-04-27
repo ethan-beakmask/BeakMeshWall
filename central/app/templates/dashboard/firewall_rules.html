@@ -224,7 +224,7 @@
             <td style="font-size:0.78rem;">{{ entry.applied_at[:19] if entry.applied_at else '' }}</td>
             <td>
               <button class="btn btn-sm btn-outline-danger" style="font-size:0.75rem;"
-                      @click="removeRule({{ entry.rule|tojson }})" :disabled="busy">Remove</button>
+                      @click='removeRule({{ entry.rule|tojson }})' :disabled="busy">Remove</button>
             </td>
           </tr>
           {% endfor %}
