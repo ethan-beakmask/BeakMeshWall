@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from flask import render_template, request
 from flask_login import login_required
 from app.dashboard import dashboard_bp
@@ -8,6 +9,81 @@ from app.models.node import Node
 from app.models.task import Task
 from app.models.threat_block import ThreatBlock
 from app.models.threat_whitelist import ThreatWhitelist
+
+
+# Threshold for considering an agent "stale" / probably offline.
+# Aligned with the 60-3600s drift_check_interval range (default 300s);
+# any node not seen in 3x default counts as suspect.
+AGENT_STALE_SECONDS = 900
+
+
+def _agent_status(node):
+    """Return ('ok'|'stale'|'never', seconds_since_last_seen|None) for a node.
+
+    'ok'    = seen within AGENT_STALE_SECONDS
+    'stale' = seen, but longer ago
+    'never' = never reported in
+    """
+    if not node or not node.last_seen_at:
+        return "never", None
+    delta = (datetime.now(timezone.utc) - node.last_seen_at).total_seconds()
+    if delta <= AGENT_STALE_SECONDS:
+        return "ok", int(delta)
+    return "stale", int(delta)
+
+
+def _recent_tasks(node_id, actions, limit=15):
+    if not node_id:
+        return []
+    rows = Task.query.filter(
+        Task.node_id == node_id,
+        Task.action.in_(actions),
+    ).order_by(Task.created_at.desc()).limit(limit).all()
+    out = []
+    for t in rows:
+        try:
+            payload = json.loads(t.payload)
+        except (TypeError, ValueError):
+            payload = {}
+        out.append({
+            "id": t.id,
+            "action": t.action,
+            "status": t.status,
+            "result": t.result or "",
+            "created_at": t.created_at.isoformat() if t.created_at else "",
+            "completed_at": t.completed_at.isoformat() if t.completed_at else "",
+            "created_by": t.created_by or "",
+            "payload_summary": _summarize_payload(t.action, payload),
+        })
+    return out
+
+
+def _summarize_payload(action, payload):
+    """Short one-line summary of a task payload for the Recent Tasks list."""
+    if action in ("apply_rule", "remove_rule"):
+        r = payload.get("rule") or {}
+        bits = [r.get("action", "?"), r.get("direction", "?")]
+        if r.get("src") and r["src"] != "any":
+            bits.append("src=" + r["src"])
+        if r.get("dst") and r["dst"] != "any":
+            bits.append("dst=" + r["dst"])
+        if r.get("dport") and r["dport"] != "any":
+            bits.append("dport=" + r["dport"])
+        return " ".join(bits)
+    if action == "apply_nginx_access":
+        return "regenerate access.conf"
+    if action in ("create_set", "delete_set"):
+        return "name=" + (payload.get("name") or "")
+    if action in ("set_add", "set_remove"):
+        return f"{payload.get('name','')} +/- {payload.get('address','')}"
+    if action == "block_ip":
+        return "ip=" + (payload.get("ip") or "")
+    if action == "unblock_ip":
+        return "ip=" + (payload.get("ip") or "")
+    if action == "cleanup_unmanaged":
+        keep = payload.get("keep_ids") or []
+        return f"keep {len(keep)} ids"
+    return ""
 
 
 @dashboard_bp.route("/")
@@ -110,9 +186,15 @@ def firewall_rules():
                 "rule": rule_obj,
                 "applied_at": r.applied_at.isoformat() if r.applied_at else "",
             })
+    agent_status, agent_age = _agent_status(selected)
+    tasks = _recent_tasks(selected.id if selected else None,
+                          ["apply_rule", "remove_rule", "cleanup_unmanaged",
+                           "block_ip", "unblock_ip", "add_rule", "delete_rule",
+                           "flush"])
     return render_template(
         "dashboard/firewall_rules.html",
         nodes=nodes, selected=selected, rules=rules,
+        agent_status=agent_status, agent_age=agent_age, tasks=tasks,
     )
 
 
@@ -137,9 +219,13 @@ def nginx_rules():
                 "rule": rule_obj,
                 "applied_at": r.applied_at.isoformat() if r.applied_at else "",
             })
+    agent_status, agent_age = _agent_status(selected)
+    tasks = _recent_tasks(selected.id if selected else None,
+                          ["apply_nginx_access"])
     return render_template(
         "dashboard/nginx_rules.html",
         nodes=nodes, selected=selected, rules=rules,
+        agent_status=agent_status, agent_age=agent_age, tasks=tasks,
     )
 
 
@@ -159,9 +245,13 @@ def named_sets():
                 "family": s.family,
                 "members": [{"id": m.id, "address": m.address} for m in s.members],
             })
+    agent_status, agent_age = _agent_status(selected)
+    tasks = _recent_tasks(selected.id if selected else None,
+                          ["create_set", "delete_set", "set_add", "set_remove"])
     return render_template(
         "dashboard/named_sets.html",
         nodes=nodes, selected=selected, sets=sets_data,
+        agent_status=agent_status, agent_age=agent_age, tasks=tasks,
     )
 
 
