@@ -41,6 +41,12 @@
 
 set -e
 
+# === Script self-version (用於驗證 self-replacement 是否生效) ===
+INSTALL_SH_VERSION="0.2.0"
+
+# 保存原始入口參數，供 sync_repo 後 self-replacement 重新執行使用
+BMW_ORIG_ARGV=("$@")
+
 # === 預設值 ===
 GITHUB_REPO="${GITHUB_REPO:-https://github.com/ethan-beakmask/BeakMeshWall.git}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
@@ -181,6 +187,34 @@ sync_repo() {
         cd "$target_dir"
         log_info "程式碼 clone 完成: $(git log --oneline -1)"
     fi
+
+    maybe_reexec_with_synced_install_sh "$target_dir"
+}
+
+# sync_repo 後若 repo 內 install.sh 與目前執行中版本不同，自動重新執行新版
+# 防止「拿舊 install.sh 跑 upgrade，repo 已是新版但 install.sh 邏輯仍是舊的」
+maybe_reexec_with_synced_install_sh() {
+    local target_dir="$1"
+    local script_path
+    script_path="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+    local new_script="$target_dir/install.sh"
+
+    if [ ! -f "$new_script" ]; then
+        return 0
+    fi
+    if [ "$script_path" = "$new_script" ]; then
+        return 0
+    fi
+    if cmp -s "$script_path" "$new_script" 2>/dev/null; then
+        return 0
+    fi
+    if [ "${BMW_INSTALL_REEXEC:-0}" = "1" ]; then
+        log_warn "已 reexec 過一次，仍與 repo 內 install.sh 不同，繼續使用目前版本"
+        return 0
+    fi
+    log_info "切換到 repo 內最新 install.sh ($new_script)，重新執行"
+    export BMW_INSTALL_REEXEC=1
+    exec bash "$new_script" "${BMW_ORIG_ARGV[@]}"
 }
 
 ensure_packages() {
@@ -966,6 +1000,8 @@ if [ $# -eq 0 ]; then
     usage
     exit 0
 fi
+
+log_info "install.sh version: $INSTALL_SH_VERSION${BMW_INSTALL_REEXEC:+ (reexec)}"
 
 COMPONENT="${1:-}"
 ACTION="${2:-}"
