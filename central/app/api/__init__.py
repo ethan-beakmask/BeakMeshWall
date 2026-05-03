@@ -9,7 +9,7 @@ def health():
     return jsonify({
         "status": "ok",
         "service": "beakmeshwall-central",
-        "version": "0.6.2",
+        "version": "0.6.3",
     }), 200
 
 

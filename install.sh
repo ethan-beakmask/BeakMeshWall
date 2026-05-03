@@ -42,7 +42,7 @@
 set -e
 
 # === Script self-version (用於驗證 self-replacement 是否生效) ===
-INSTALL_SH_VERSION="0.2.0"
+INSTALL_SH_VERSION="0.2.1"
 
 # 保存原始入口參數，供 sync_repo 後 self-replacement 重新執行使用
 BMW_ORIG_ARGV=("$@")
