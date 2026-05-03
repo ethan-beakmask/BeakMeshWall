@@ -87,7 +87,7 @@ def _build_fw_port_index(fw_state):
     if not managed:
         return index
 
-    for chain in managed.get("chains", []):
+    for chain in (managed.get("chains") or []):
         if chain.get("hook") != "input":
             continue
         for rule in (chain.get("rules") or []):
@@ -145,8 +145,8 @@ def _detect_fw_global_policy(fw_state):
     if not fw_state:
         return None
 
-    for table in fw_state.get("external_tables", []):
-        for chain in table.get("chains", []):
+    for table in (fw_state.get("external_tables") or []):
+        for chain in (table.get("chains") or []):
             if chain.get("hook") != "input":
                 continue
             rules = chain.get("rules") or []
@@ -234,7 +234,7 @@ def _build_nginx_port_index(nginx_state):
     if not nginx_state:
         return index
 
-    for server in nginx_state.get("servers", []):
+    for server in (nginx_state.get("servers") or []):
         port = server.get("listen_port", 0)
         if port == 0:
             continue
@@ -249,7 +249,7 @@ def _build_nginx_port_index(nginx_state):
             ),
             "server_name": server.get("server_name", "_"),
             "backend": server.get("backend", ""),
-            "locations": server.get("locations", []),
+            "locations": server.get("locations") or [],
         }
 
     return index
@@ -261,7 +261,7 @@ def _build_service_port_index(service_state):
     if not service_state:
         return index
 
-    for listener in service_state.get("listeners", []):
+    for listener in (service_state.get("listeners") or []):
         port = listener.get("port", 0)
         if port == 0:
             continue
