@@ -464,7 +464,7 @@ server {
         return 444;
     }
 
-    location /bmw/ {
+    location /beakmeshwall/ {
         proxy_pass http://127.0.0.1:$APP_PORT;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -473,7 +473,7 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    location = /bmw {
+    location = /beakmeshwall {
         proxy_pass http://127.0.0.1:$APP_PORT;
         proxy_set_header Host \$host;
     }
@@ -569,7 +569,7 @@ central_install() {
     echo ""
     echo "============================================"
     log_info "Central 全新安裝完成"
-    echo "  URL:           http://$server_ip:$NGINX_PORT/bmw/"
+    echo "  URL:           http://$server_ip:$NGINX_PORT/beakmeshwall/"
     echo "  Health:        http://$server_ip:$NGINX_PORT/api/v1/health"
     echo "  管理員:        $ADMIN_USERNAME"
     echo "  DB:            $DB_NAME (使用者: $DB_USER)"
