@@ -417,6 +417,7 @@ write_central_nginx() {
 
 server {
     listen $server_ip:$NGINX_PORT;
+    listen 127.0.0.1:$NGINX_PORT;
     server_name _;
 
     client_max_body_size 4M;
@@ -782,6 +783,8 @@ write_agent_systemd() {
 Description=BeakMeshWall Agent
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -789,8 +792,6 @@ User=root
 ExecStart=$AGENT_BINARY -config $AGENT_CONFIG
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=10
 
 NoNewPrivileges=true
 ProtectHome=true
